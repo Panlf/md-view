@@ -507,12 +507,7 @@ fn scan_directory(path: &Path) -> AppResult<FileNode> {
             continue;
         }
 
-        if child_path.is_dir() {
-            let node = scan_directory(&child_path)?;
-            if !node.children.is_empty() {
-                children.push(node);
-            }
-        } else if is_browsable_text_path(&child_path) {
+        if child_path.is_file() && is_browsable_text_path(&child_path) {
             let child_metadata = fs::metadata(&child_path).map_err(to_error)?;
             children.push(FileNode {
                 path: normalize_path(&child_path),
