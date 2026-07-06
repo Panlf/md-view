@@ -16,6 +16,24 @@ export type Heading = {
   anchor: string;
 };
 
+export type LinkValidationRequest = {
+  href: string;
+  kind: 'link' | 'image';
+};
+
+export type LinkValidationResult = {
+  href: string;
+  kind: 'link' | 'image';
+  ok: boolean;
+  target_path?: string;
+  message?: string;
+};
+
+export type WorkspaceHeading = Heading & {
+  path: string;
+  file_name: string;
+};
+
 export type ReadFileResult = {
   path: string;
   content: string;

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "md-view Plus",
+  "version": "0.1.0",
+  "identifier": "local.markdown.reader.editor.plus",
+  "build": {
+    "beforeDevCommand": "npm run dev:plus",
+    "beforeBuildCommand": "npm run build:plus"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "md-view Plus",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "name": "md-view Plus Markdown Document",
+        "description": "Markdown document",
+        "mimeType": "text/markdown",
+        "role": "Editor"
+      }
+    ],
+    "shortDescription": "Enhanced local Markdown reader and editor",
+    "longDescription": "md-view Plus adds enhanced Markdown preview support for frontmatter, footnotes, stable heading anchors, code highlighting, math formulas, and Mermaid diagrams."
+  }
+}

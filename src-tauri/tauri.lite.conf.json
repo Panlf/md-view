@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "md-view Lite",
+  "version": "0.2.4",
+  "identifier": "local.markdown.reader.editor.lite",
+  "build": {
+    "beforeDevCommand": "npm run dev:lite",
+    "beforeBuildCommand": "npm run build:lite"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "md-view Lite",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "name": "md-view Lite Markdown Document",
+        "description": "Markdown document",
+        "mimeType": "text/markdown",
+        "role": "Editor"
+      }
+    ],
+    "shortDescription": "Lightweight local Markdown reader and editor",
+    "longDescription": "md-view Lite keeps the compact local Markdown reader and editor experience with directory browsing, source editing, preview, drafts, and save conflict detection."
+  }
+}

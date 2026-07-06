@@ -1,10 +1,10 @@
 use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{hash_map::DefaultHasher, HashSet},
     fs,
     hash::{Hash, Hasher},
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
@@ -54,6 +54,31 @@ struct SaveResult {
 
 #[derive(Debug, Serialize)]
 struct Heading {
+    level: usize,
+    text: String,
+    line: usize,
+    anchor: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LinkValidationRequest {
+    href: String,
+    kind: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LinkValidationResult {
+    href: String,
+    kind: String,
+    ok: bool,
+    target_path: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkspaceHeading {
+    path: String,
+    file_name: String,
     level: usize,
     text: String,
     line: usize,
@@ -336,6 +361,60 @@ fn save_file(path: String, content: String, expected: Option<u64>, overwrite: bo
 
 #[tauri::command]
 fn extract_outline(content: String) -> Vec<Heading> {
+    extract_headings_from_content(&content)
+}
+
+#[tauri::command]
+fn validate_local_links(markdown_path: String, links: Vec<LinkValidationRequest>) -> AppResult<Vec<LinkValidationResult>> {
+    let base_file = PathBuf::from(&markdown_path);
+    let base_dir = base_file.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let current_content = if base_file.is_file() {
+        read_file_path(&base_file).ok().map(|file| file.content)
+    } else {
+        None
+    };
+    let current_anchors = current_content
+        .as_ref()
+        .map(|content| heading_anchor_set(&extract_headings_from_content(content)))
+        .unwrap_or_default();
+
+    Ok(links
+        .into_iter()
+        .map(|link| validate_one_link(&base_dir, &current_anchors, link))
+        .collect())
+}
+
+#[tauri::command]
+fn index_workspace_headings(workspace: String) -> AppResult<Vec<WorkspaceHeading>> {
+    let root = PathBuf::from(workspace);
+    if !root.is_dir() {
+        return Err("Workspace path is not a directory.".into());
+    }
+
+    let mut headings = Vec::new();
+    collect_workspace_headings(&root, &mut headings)?;
+    headings.sort_by(|left, right| {
+        left.path
+            .to_lowercase()
+            .cmp(&right.path.to_lowercase())
+            .then_with(|| left.line.cmp(&right.line))
+    });
+    Ok(headings)
+}
+
+#[tauri::command]
+fn export_html(path: String, html: String) -> AppResult<()> {
+    let output = PathBuf::from(path);
+    if let Some(parent) = output.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+    }
+    let mut file = fs::File::create(output).map_err(to_error)?;
+    file.write_all(html.as_bytes()).map_err(to_error)
+}
+
+fn extract_headings_from_content(content: &str) -> Vec<Heading> {
     let mut headings = Vec::new();
     let mut in_fence = false;
 
@@ -371,6 +450,197 @@ fn extract_outline(content: String) -> Vec<Heading> {
     }
 
     headings
+}
+
+fn heading_anchor_set(headings: &[Heading]) -> HashSet<String> {
+    headings
+        .iter()
+        .enumerate()
+        .flat_map(|(index, heading)| {
+            [
+                heading.anchor.clone(),
+                slug_heading(&heading.text, index),
+                format!("heading-{}", heading.line),
+            ]
+        })
+        .collect()
+}
+
+fn validate_one_link(base_dir: &Path, current_anchors: &HashSet<String>, link: LinkValidationRequest) -> LinkValidationResult {
+    let href = link.href.trim().to_string();
+    let kind = link.kind;
+    if href.is_empty() || is_external_href(&href) {
+        return link_result(href, kind, true, None, None);
+    }
+
+    if let Some(anchor) = href.strip_prefix('#') {
+        let ok = current_anchors.contains(anchor);
+        return link_result(
+            href,
+            kind,
+            ok,
+            None,
+            if ok { None } else { Some("Heading anchor not found.".into()) },
+        );
+    }
+
+    let (path_part, anchor) = split_href_path_anchor(&href);
+    let target = resolve_link_path(base_dir, path_part);
+    if !target.exists() {
+        return link_result(
+            href,
+            kind,
+            false,
+            Some(normalize_path(&target)),
+            Some("Local target not found.".into()),
+        );
+    }
+
+    if let Some(anchor) = anchor {
+        if is_markdown_path(&target) {
+            if let Ok(file) = read_file_path(&target) {
+                let anchors = heading_anchor_set(&extract_headings_from_content(&file.content));
+                let ok = anchors.contains(anchor);
+                return link_result(
+                    href,
+                    kind,
+                    ok,
+                    Some(normalize_path(&target)),
+                    if ok { None } else { Some("Target heading not found.".into()) },
+                );
+            }
+        }
+    }
+
+    link_result(href, kind, true, Some(normalize_path(&target)), None)
+}
+
+fn link_result(href: String, kind: String, ok: bool, target_path: Option<String>, message: Option<String>) -> LinkValidationResult {
+    LinkValidationResult {
+        href,
+        kind,
+        ok,
+        target_path,
+        message,
+    }
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> AppResult<()> {
+    if !is_allowed_external_url(&url) {
+        return Err("Only http, https, mailto, and tel links can be opened externally.".into());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        hidden_command("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .spawn()
+            .map(|_| ())
+            .map_err(to_error)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map(|_| ())
+            .map_err(to_error)
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map(|_| ())
+            .map_err(to_error)
+    }
+}
+
+fn is_external_href(href: &str) -> bool {
+    let lower = href.to_lowercase();
+    lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("mailto:")
+        || lower.starts_with("tel:")
+        || lower.starts_with("data:")
+        || lower.starts_with("blob:")
+        || lower.starts_with("asset:")
+}
+
+fn is_allowed_external_url(url: &str) -> bool {
+    if url.chars().any(|char| char.is_control()) {
+        return false;
+    }
+    let lower = url.trim().to_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:") || lower.starts_with("tel:")
+}
+
+fn split_href_path_anchor(href: &str) -> (&str, Option<&str>) {
+    let clean = href.split('?').next().unwrap_or(href);
+    let mut parts = clean.splitn(2, '#');
+    let path = parts.next().unwrap_or(clean);
+    (path, parts.next().filter(|anchor| !anchor.is_empty()))
+}
+
+fn resolve_link_path(base_dir: &Path, source: &str) -> PathBuf {
+    let decoded = percent_decode_path(source);
+    let path = PathBuf::from(decoded);
+    if path.is_absolute() {
+        path
+    } else {
+        base_dir.join(path)
+    }
+}
+
+fn percent_decode_path(source: &str) -> String {
+    let mut output = String::new();
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(value) = u8::from_str_radix(&source[index + 1..index + 3], 16) {
+                output.push(value as char);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index] as char);
+        index += 1;
+    }
+    output
+}
+
+fn collect_workspace_headings(root: &Path, headings: &mut Vec<WorkspaceHeading>) -> AppResult<()> {
+    for entry in fs::read_dir(root).map_err(to_error)? {
+        let entry = entry.map_err(to_error)?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if should_skip(&name) {
+            continue;
+        }
+        if path.is_dir() {
+            collect_workspace_headings(&path, headings)?;
+            continue;
+        }
+        if !is_markdown_path(&path) {
+            continue;
+        }
+        let file = read_file_path(&path)?;
+        for heading in extract_headings_from_content(&file.content) {
+            headings.push(WorkspaceHeading {
+                path: normalize_path(&path),
+                file_name: name.clone(),
+                level: heading.level,
+                text: heading.text,
+                line: heading.line,
+                anchor: heading.anchor,
+            });
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -488,7 +758,11 @@ pub fn run() {
             list_drafts,
             clear_workspace_drafts,
             initial_open_paths,
-            open_default_app_settings
+            open_default_app_settings,
+            open_external_url,
+            validate_local_links,
+            index_workspace_headings,
+            export_html
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -674,6 +948,28 @@ fn stable_hash(value: &str) -> String {
 
 fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+fn slug_heading(text: &str, index: usize) -> String {
+    let mut slug = String::new();
+    let mut previous_dash = false;
+    for char in text.trim().to_lowercase().chars() {
+        if char.is_alphanumeric() {
+            slug.push(char);
+            previous_dash = false;
+        } else if char.is_whitespace() || char == '-' {
+            if !previous_dash && !slug.is_empty() {
+                slug.push('-');
+                previous_dash = true;
+            }
+        }
+    }
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        format!("heading-{}", index + 1)
+    } else {
+        format!("heading-{slug}")
+    }
 }
 
 fn to_error<E: std::fmt::Display>(error: E) -> String {

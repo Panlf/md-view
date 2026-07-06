@@ -75,23 +75,24 @@ jobs:
       - name: Check frontend
         run: npm run check
 
-      - name: Build frontend
-        run: npm run build
+      - name: Build Lite app
+        run: npm run tauri:build:lite -- ${{ matrix.args }}
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        with:
-          args: ${{ matrix.args }}
+      - name: Build Plus app
+        run: npm run tauri:build:plus -- ${{ matrix.args }}
 
       - name: Prepare portable Windows exe
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $versions = Get-Content editionVersions.json | ConvertFrom-Json
           New-Item -ItemType Directory -Force -Path release-portable | Out-Null
           Copy-Item `
-            -LiteralPath src-tauri/target/release/md-view.exe `
-            -Destination "release-portable/md-view-portable-$version-windows-x64.exe"
+            -LiteralPath src-tauri/target/release/md-view-lite.exe `
+            -Destination "release-portable/md-view-lite_$($versions.lite)_windows-x64-portable.exe"
+          Copy-Item `
+            -LiteralPath src-tauri/target/release/md-view-plus.exe `
+            -Destination "release-portable/md-view-plus_$($versions.plus)_windows-x64-portable.exe"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
