@@ -23,12 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            args: --bundles appimage,deb,rpm
           - platform: macos-latest
             args: --bundles dmg
           - platform: windows-latest
-            args: --bundles nsis
+            args: --no-bundle
 
     runs-on: ${{ matrix.platform }}
     permissions:
@@ -37,23 +35,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            rpm
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -101,11 +82,8 @@ jobs:
           name: md-view-${{ matrix.platform }}
           path: |
             release-portable/*.exe
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.rpm
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/md-view-lite_*.dmg
+            src-tauri/target/release/bundle/**/md-view-plus_*.dmg
           if-no-files-found: warn
 
   release:
@@ -126,8 +104,5 @@ jobs:
         with:
           draft: true
           files: |
-            release-artifacts/**/*.AppImage
-            release-artifacts/**/*.deb
-            release-artifacts/**/*.rpm
             release-artifacts/**/*.dmg
-            release-artifacts/**/*.exe
+            release-artifacts/**/release-portable/*.exe
