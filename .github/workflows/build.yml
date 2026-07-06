@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - plus
     tags:
       - "v*"
   pull_request:
@@ -22,12 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            args: --bundles appimage,deb,rpm
           - platform: macos-latest
             args: --bundles dmg
           - platform: windows-latest
-            args: --bundles nsis
+            args: --no-bundle
 
     runs-on: ${{ matrix.platform }}
     permissions:
@@ -36,23 +35,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            rpm
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -75,23 +57,24 @@ jobs:
       - name: Check frontend
         run: npm run check
 
-      - name: Build frontend
-        run: npm run build
+      - name: Build Lite app
+        run: npm run tauri:build:lite -- ${{ matrix.args }}
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        with:
-          args: ${{ matrix.args }}
+      - name: Build Plus app
+        run: npm run tauri:build:plus -- ${{ matrix.args }}
 
       - name: Prepare portable Windows exe
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $versions = Get-Content editionVersions.json | ConvertFrom-Json
           New-Item -ItemType Directory -Force -Path release-portable | Out-Null
           Copy-Item `
-            -LiteralPath src-tauri/target/release/md-view.exe `
-            -Destination "release-portable/md-view-portable-$version-windows-x64.exe"
+            -LiteralPath src-tauri/target/release/md-view-lite.exe `
+            -Destination "release-portable/md-view-lite_$($versions.lite)_windows-x64-portable.exe"
+          Copy-Item `
+            -LiteralPath src-tauri/target/release/md-view-plus.exe `
+            -Destination "release-portable/md-view-plus_$($versions.plus)_windows-x64-portable.exe"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -99,11 +82,8 @@ jobs:
           name: md-view-${{ matrix.platform }}
           path: |
             release-portable/*.exe
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.rpm
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/md-view-lite_*.dmg
+            src-tauri/target/release/bundle/**/md-view-plus_*.dmg
           if-no-files-found: warn
 
   release:
@@ -124,8 +104,5 @@ jobs:
         with:
           draft: true
           files: |
-            release-artifacts/**/*.AppImage
-            release-artifacts/**/*.deb
-            release-artifacts/**/*.rpm
             release-artifacts/**/*.dmg
-            release-artifacts/**/*.exe
+            release-artifacts/**/release-portable/*.exe

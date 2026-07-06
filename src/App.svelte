@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { confirm, message, open } from '@tauri-apps/plugin-dialog';
+  import { confirm, message, open, save } from '@tauri-apps/plugin-dialog';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -8,14 +8,19 @@
   import MarkdownEditor from './components/MarkdownEditor.svelte';
   import MarkdownPreview from './components/MarkdownPreview.svelte';
   import OutlinePanel from './components/OutlinePanel.svelte';
+  import PlusSettingsPanel from './components/PlusSettingsPanel.svelte';
   import VisualMarkdownEditor from './components/VisualMarkdownEditor.svelte';
+  import { appVersion, editionDisplayName, isPlusEdition, plusMarkdownStatus } from './edition';
   import { formatText, loadLanguage, nextLanguage, saveLanguage, text, type Language } from './i18n';
+  import { defaultPlusPreferences, loadPlusPreferences, plusReaderStyle, savePlusPreferences, type PlusPreferences } from './plusPreferences';
   import { applyTheme, BACKGROUND_IMAGE_STORAGE_KEY, findTheme, THEME_STORAGE_KEY, themes } from './themes';
-  import type { AppTheme, FileNode, Heading, ReadFileResult, ViewMode } from './types';
+  import type { AppTheme, FileNode, Heading, ReadFileResult, ViewMode, WorkspaceHeading } from './types';
   import {
     clearWorkspaceDrafts,
     deleteDraft,
+    exportHtml,
     extractOutline,
+    indexWorkspaceHeadings,
     initialOpenPaths,
     openDefaultAppSettings,
     openPath,
@@ -38,6 +43,15 @@
   let language: Language = 'zh';
   let t = text.zh;
   let status = t.status.ready;
+  let renderStatus = isPlusEdition ? plusMarkdownStatus : '';
+  let plusPreferences: PlusPreferences = defaultPlusPreferences;
+  let plusSettingsOpen = false;
+  let renderedHtml = '';
+  let linkStatus = { broken: 0, total: 0 };
+  let activeOutlineLine = 0;
+  let workspaceHeadings: WorkspaceHeading[] = [];
+  let headingSearch = '';
+  let headingIndexBusy = false;
   let busy = false;
   let defaultSettingsBusy = false;
   let dirty = false;
@@ -65,7 +79,10 @@
   $: t = text[language];
   $: rootNodes = tree ? tree.children : [];
   $: fileName = selectedPath ? selectedPath.split(/[\\/]/).pop() ?? selectedPath : '';
-  $: contentPaneStyle = backgroundImageUrl ? `--reader-background-image: url("${backgroundImageUrl}")` : '';
+  $: appDisplayTitle = appVersion ? `${editionDisplayName} ${appVersion}` : editionDisplayName;
+  $: contentPaneStyle = [backgroundImageUrl ? `--reader-background-image: url("${backgroundImageUrl}")` : '', isPlusEdition ? plusReaderStyle(plusPreferences) : '']
+    .filter(Boolean)
+    .join('; ');
   $: workspaceStyle = [
     `--left-sidebar-width: ${leftSidebarCollapsed ? '44px' : '280px'}`,
     `--right-sidebar-width: ${rightSidebarCollapsed ? '44px' : '240px'}`
@@ -117,6 +134,9 @@
   function applyWorkspace(nextTree: FileNode, nextPath: string, resetFile: boolean) {
     tree = nextTree;
     workspacePath = nextPath;
+    if (isPlusEdition) {
+      void refreshHeadingIndex(nextPath);
+    }
     if (resetFile) {
       clearCurrentFile();
     }
@@ -128,6 +148,9 @@
     savedContent = '';
     encoding = '';
     outline = [];
+    renderedHtml = '';
+    linkStatus = { broken: 0, total: 0 };
+    activeOutlineLine = 0;
     dirty = false;
     modifiedAt = null;
   }
@@ -137,6 +160,9 @@
     busy = true;
     try {
       tree = await openWorkspace(workspacePath);
+      if (isPlusEdition) {
+        void refreshHeadingIndex(workspacePath);
+      }
       status = t.status.folderRefreshed;
     } catch (error) {
       status = t.status.refreshFailed;
@@ -212,6 +238,33 @@
 
     await updateOutlineNow();
     status = dirty ? t.status.draftRestored : t.status.fileOpened;
+  }
+
+  function setRenderStatus(nextStatus: string) {
+    renderStatus = isPlusEdition ? nextStatus : '';
+  }
+
+  function setPlusPreferences(next: PlusPreferences) {
+    plusPreferences = next;
+    savePlusPreferences(next);
+    status = 'Plus 设置已更新';
+  }
+
+  function resetPlusPreferences() {
+    setPlusPreferences(defaultPlusPreferences);
+  }
+
+  async function refreshHeadingIndex(path: string) {
+    if (!path) return;
+    headingIndexBusy = true;
+    try {
+      workspaceHeadings = await indexWorkspaceHeadings(path);
+      status = `标题索引完成：${workspaceHeadings.length} 项`;
+    } catch (error) {
+      status = `标题索引失败：${String(error)}`;
+    } finally {
+      headingIndexBusy = false;
+    }
   }
 
   function setContent(next: string) {
@@ -409,6 +462,9 @@
 
   function restoreAppearanceSettings() {
     language = loadLanguage();
+    if (isPlusEdition) {
+      plusPreferences = loadPlusPreferences();
+    }
     selectedTheme = findTheme(localStorage.getItem(THEME_STORAGE_KEY));
     applyTheme(selectedTheme);
     leftSidebarCollapsed = localStorage.getItem(LEFT_SIDEBAR_COLLAPSED_KEY) === 'true';
@@ -488,6 +544,70 @@
 
   function themeLabel(theme: AppTheme) {
     return t.themeNames[theme.id as keyof typeof t.themeNames] ?? theme.name;
+  }
+
+  async function exportCurrentHtml() {
+    if (!isPlusEdition || !selectedPath || !renderedHtml) return;
+    const selected = await save({
+      title: '导出 HTML',
+      defaultPath: `${fileName || 'md-view'}.html`,
+      filters: [{ name: 'HTML', extensions: ['html'] }]
+    });
+    if (typeof selected !== 'string') return;
+    const outputPath = selected.toLowerCase().endsWith('.html') ? selected : `${selected}.html`;
+    try {
+      await exportHtml(outputPath, buildExportHtml());
+      status = 'HTML 已导出';
+    } catch (error) {
+      status = `HTML 导出失败：${String(error)}`;
+    }
+  }
+
+  function printCurrentDocument() {
+    if (!isPlusEdition) return;
+    window.print();
+  }
+
+  function buildExportHtml() {
+    const title = fileName || 'md-view export';
+    const themeVars = Object.entries(selectedTheme.tokens)
+      .map(([key, value]) => `--${key.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`)}:${value};`)
+      .join('');
+    return [
+      '<!doctype html>',
+      '<html lang="zh-CN">',
+      '<head>',
+      '<meta charset="utf-8">',
+      `<title>${escapeHtml(title)}</title>`,
+      '<style>',
+      `:root{${themeVars}${plusReaderStyle(plusPreferences)}}`,
+      'body{margin:0;background:var(--content-bg);color:var(--markdown-text);font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",system-ui,sans-serif;}',
+      '.markdown-preview{max-width:var(--reader-max-width);margin:0 auto;padding:40px min(7vw,72px);font-size:var(--reader-font-size);line-height:var(--reader-line-height);}',
+      'img{max-width:100%;height:auto}pre{overflow:auto;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--markdown-pre-bg)}code{font-family:"Cascadia Code","Consolas",monospace}table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}th,td{padding:7px 9px;border:1px solid var(--border)}blockquote{padding-left:14px;border-left:3px solid var(--markdown-quote-border);color:var(--markdown-quote-text)}',
+      '</style>',
+      '</head>',
+      '<body>',
+      `<article class="markdown-preview">${renderedHtml}</article>`,
+      '</body>',
+      '</html>'
+    ].join('');
+  }
+
+  function escapeHtml(value: string) {
+    return value.replace(/[&<>"']/g, (char) => {
+      switch (char) {
+        case '&':
+          return '&amp;';
+        case '<':
+          return '&lt;';
+        case '>':
+          return '&gt;';
+        case '"':
+          return '&quot;';
+        default:
+          return '&#39;';
+      }
+    });
   }
 
   function switchLanguage() {
@@ -576,6 +696,9 @@
       >
         {defaultSettingsBusy ? t.actions.setting : t.actions.setDefault}
       </button>
+      {#if isPlusEdition}
+        <button class:active={plusSettingsOpen} title="Plus 阅读设置" on:click={() => (plusSettingsOpen = true)}>Plus</button>
+      {/if}
     </div>
 
     <div class="toolbar-center">
@@ -609,6 +732,15 @@
         <span class:dot-dirty={dirty} class="dot"></span>
         {#if encoding}
           <span class="muted">{encoding}</span>
+        {/if}
+        {#if renderStatus}
+          <span class="edition-badge">{renderStatus}</span>
+        {/if}
+        {#if isPlusEdition && linkStatus.total > 0}
+          <span class:dirty={linkStatus.broken > 0} class="muted">{linkStatus.broken}/{linkStatus.total} 链接</span>
+        {/if}
+        {#if isPlusEdition && headingIndexBusy}
+          <span class="muted">索引中</span>
         {/if}
         <span class="muted">{status}</span>
       </div>
@@ -660,7 +792,7 @@
     <section class="content-pane" class:has-reader-bg={Boolean(backgroundImageUrl)} style={contentPaneStyle}>
       {#if !selectedPath}
         <div class="empty-state">
-          <h1>md-view</h1>
+          <h1>{appDisplayTitle}</h1>
           <p>{t.panels.emptyState}</p>
         </div>
       {:else if mode === 'read'}
@@ -669,7 +801,12 @@
           {content}
           {outline}
           filePath={selectedPath}
+          preferences={plusPreferences}
           on:openLocalFile={(event) => selectFile(event.detail)}
+          on:renderStatus={(event) => setRenderStatus(event.detail)}
+          on:renderHtml={(event) => (renderedHtml = event.detail)}
+          on:linkStatus={(event) => (linkStatus = event.detail)}
+          on:activeLine={(event) => (activeOutlineLine = event.detail)}
         />
       {:else if mode === 'edit'}
         <MarkdownEditor bind:this={editorRef} value={content} on:change={(event) => setContent(event.detail)} />
@@ -690,7 +827,12 @@
             {content}
             {outline}
             filePath={selectedPath}
+            preferences={plusPreferences}
             on:openLocalFile={(event) => selectFile(event.detail)}
+            on:renderStatus={(event) => setRenderStatus(event.detail)}
+            on:renderHtml={(event) => (renderedHtml = event.detail)}
+            on:linkStatus={(event) => (linkStatus = event.detail)}
+            on:activeLine={(event) => (activeOutlineLine = event.detail)}
           />
         </div>
       {/if}
@@ -718,12 +860,46 @@
             ›
           </button>
         </div>
-        <OutlinePanel headings={outline} strings={t.panels} on:jump={(event) => jumpToHeading(event.detail)} />
+        {#if isPlusEdition}
+          <div class="outline-tools">
+            <input type="search" placeholder="过滤标题" bind:value={headingSearch} />
+          </div>
+        {/if}
+        <OutlinePanel
+          headings={outline}
+          strings={t.panels}
+          activeLine={activeOutlineLine}
+          filter={headingSearch}
+          on:jump={(event) => jumpToHeading(event.detail)}
+        />
+        {#if isPlusEdition && headingSearch.trim() && workspaceHeadings.length > 0}
+          <div class="workspace-heading-results">
+            <div class="workspace-heading-title">工作区标题</div>
+            {#each workspaceHeadings.filter((heading) => heading.text.toLowerCase().includes(headingSearch.trim().toLowerCase())).slice(0, 24) as heading}
+              <button type="button" style={`--level: ${heading.level}`} on:click={() => selectFile(heading.path)}>
+                <span>{heading.text}</span>
+                <small>{heading.file_name}</small>
+              </button>
+            {/each}
+          </div>
+        {/if}
       {/if}
     </aside>
   </section>
 
   {#if immersiveMode}
     <button class="immersive-exit" on:click={() => setImmersiveMode(false)}>{t.actions.exitImmersive}</button>
+  {/if}
+
+  {#if isPlusEdition}
+    <PlusSettingsPanel
+      open={plusSettingsOpen}
+      preferences={plusPreferences}
+      onChange={setPlusPreferences}
+      onClose={() => (plusSettingsOpen = false)}
+      onReset={resetPlusPreferences}
+      onExportHtml={exportCurrentHtml}
+      onPrint={printCurrentDocument}
+    />
   {/if}
 </main>

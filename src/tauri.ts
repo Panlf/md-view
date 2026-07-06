@@ -1,5 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { DraftContent, DraftSummary, FileNode, Heading, OpenPathResult, ReadFileResult, SaveResult } from './types';
+import type {
+  DraftContent,
+  DraftSummary,
+  FileNode,
+  Heading,
+  LinkValidationRequest,
+  LinkValidationResult,
+  OpenPathResult,
+  ReadFileResult,
+  SaveResult,
+  WorkspaceHeading
+} from './types';
 
 export function openWorkspace(path: string): Promise<FileNode> {
   return invoke('open_workspace', { path });
@@ -47,4 +58,20 @@ export function initialOpenPaths(): Promise<string[]> {
 
 export function openDefaultAppSettings(): Promise<void> {
   return invoke('open_default_app_settings');
+}
+
+export function openExternalUrl(url: string): Promise<void> {
+  return invoke('open_external_url', { url });
+}
+
+export function validateLocalLinks(path: string, links: LinkValidationRequest[]): Promise<LinkValidationResult[]> {
+  return invoke('validate_local_links', { markdownPath: path, links });
+}
+
+export function indexWorkspaceHeadings(workspace: string): Promise<WorkspaceHeading[]> {
+  return invoke('index_workspace_headings', { workspace });
+}
+
+export function exportHtml(path: string, html: string): Promise<void> {
+  return invoke('export_html', { path, html });
 }
