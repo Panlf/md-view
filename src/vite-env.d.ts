@@ -9,12 +9,18 @@ interface ImportMetaEnv {
 declare module '#markdown-renderer' {
   import type { Heading } from './types';
   import type { MarkdownRenderResult } from './markdown/renderers/shared';
-  import type { PlusPreferences } from './plusPreferences';
 
   export function renderMarkdown(
     source: string,
     headings: Heading[],
     markdownPath: string,
-    preferences?: PlusPreferences
+    preferences?: unknown
   ): Promise<MarkdownRenderResult>;
+}
+
+declare module '#edition-app' {
+  import type { Component } from 'svelte';
+
+  const App: Component;
+  export default App;
 }

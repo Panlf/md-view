@@ -6,18 +6,24 @@ import { fileURLToPath } from 'node:url';
 const editionVersions = JSON.parse(readFileSync(new URL('./editionVersions.json', import.meta.url), 'utf8'));
 
 export default defineConfig(({ mode }) => {
-  const edition = process.env.VITE_MD_VIEW_EDITION === 'plus' || mode === 'plus' ? 'plus' : 'lite';
+  const isWebPlus = mode === 'web-plus';
+  const edition = process.env.VITE_MD_VIEW_EDITION === 'plus' || mode === 'plus' || isWebPlus ? 'plus' : 'lite';
   process.env.VITE_MD_VIEW_EDITION = edition;
   process.env.VITE_MD_VIEW_VERSION = editionVersions[edition];
+  process.env.VITE_MD_VIEW_TARGET = isWebPlus ? 'web' : 'desktop';
   const rendererEntry = fileURLToPath(new URL(`./src/markdown/renderers/${edition}-entry.ts`, import.meta.url));
+  const editionAppName = isWebPlus ? 'WebPlusApp' : edition === 'plus' ? 'PlusApp' : 'LiteApp';
+  const editionAppEntry = fileURLToPath(new URL(`./src/${editionAppName}.svelte`, import.meta.url));
 
   return {
     plugins: [svelte({ configFile: './svelte.config.js' })],
     resolve: {
       alias: {
+        '#edition-app': editionAppEntry,
         '#markdown-renderer': rendererEntry
       }
     },
+    base: process.env.VITE_BASE_PATH ?? './',
     clearScreen: false,
     server: {
       host: '127.0.0.1',

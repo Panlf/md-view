@@ -10,6 +10,7 @@ on:
       - "v*"
   pull_request:
     branches:
+      - plus
       - main
       - master
   workflow_dispatch:
@@ -24,8 +25,16 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
+            edition: lite
             args: --bundles dmg
           - platform: windows-latest
+            edition: lite
+            args: --no-bundle
+          - platform: macos-latest
+            edition: plus
+            args: --bundles dmg
+          - platform: windows-latest
+            edition: plus
             args: --no-bundle
 
     runs-on: ${{ matrix.platform }}
@@ -57,33 +66,28 @@ jobs:
       - name: Check frontend
         run: npm run check
 
-      - name: Build Lite app
-        run: npm run tauri:build:lite -- ${{ matrix.args }}
+      - name: Check edition consistency
+        run: npm run check:editions
 
-      - name: Build Plus app
-        run: npm run tauri:build:plus -- ${{ matrix.args }}
-
-      - name: Prepare portable Windows exe
-        if: matrix.platform == 'windows-latest'
+      - name: Read edition version
+        id: edition-version
         shell: pwsh
         run: |
-          $versions = Get-Content editionVersions.json | ConvertFrom-Json
-          New-Item -ItemType Directory -Force -Path release-portable | Out-Null
-          Copy-Item `
-            -LiteralPath src-tauri/target/release/md-view-lite.exe `
-            -Destination "release-portable/md-view-lite_$($versions.lite)_windows-x64-portable.exe"
-          Copy-Item `
-            -LiteralPath src-tauri/target/release/md-view-plus.exe `
-            -Destination "release-portable/md-view-plus_$($versions.plus)_windows-x64-portable.exe"
+          $edition = "${{ matrix.edition }}"
+          $versions = Get-Content editionVersions.json -Raw | ConvertFrom-Json
+          $version = $versions.PSObject.Properties[$edition].Value
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build ${{ matrix.edition }} app
+        run: npm run tauri:build:${{ matrix.edition }} -- ${{ matrix.args }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: md-view-${{ matrix.platform }}
+          name: md-view-${{ matrix.edition }}-${{ steps.edition-version.outputs.version }}-${{ matrix.platform }}
           path: |
-            release-portable/*.exe
-            src-tauri/target/release/bundle/**/md-view-lite_*.dmg
-            src-tauri/target/release/bundle/**/md-view-plus_*.dmg
+            release/md-view-${{ matrix.edition }}_*.exe
+            release/md-view-${{ matrix.edition }}_*.dmg
           if-no-files-found: warn
 
   release:
@@ -105,4 +109,4 @@ jobs:
           draft: true
           files: |
             release-artifacts/**/*.dmg
-            release-artifacts/**/release-portable/*.exe
+            release-artifacts/**/*.exe
