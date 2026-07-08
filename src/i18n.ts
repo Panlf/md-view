@@ -6,6 +6,8 @@ export type AppText = {
   languageName: string;
   dropText: string;
   actions: {
+    open: string;
+    openFile: string;
     openFolder: string;
     refresh: string;
     save: string;
@@ -36,6 +38,7 @@ export type AppText = {
   };
   dialogs: Record<
     | 'chooseMarkdownDir'
+    | 'chooseTextFile'
     | 'openFailed'
     | 'refreshFailed'
     | 'unsavedTitle'
@@ -86,6 +89,9 @@ export type AppText = {
     | 'immersiveOnFailed'
     | 'immersiveOffFailed'
     | 'closeFailed'
+    | 'loadingEditor'
+    | 'loadingVisualEditor'
+    | 'editorLoadFailed'
     | 'languageChanged',
     string
   >;
@@ -96,6 +102,11 @@ export type AppText = {
     clearBackground: string;
     chooseBackground: string;
     immersiveMode: string;
+    fileMenu: string;
+    displayMenu: string;
+    renderEngine: string;
+    readingFocus: string;
+    readingFocusTitle: string;
     dark: string;
     light: string;
   };
@@ -132,6 +143,8 @@ export const text: Record<Language, AppText> = {
     languageName: '中文',
     dropText: '松开以打开文本文件',
     actions: {
+      open: '打开',
+      openFile: '打开文件',
       openFolder: '打开目录',
       refresh: '刷新',
       save: '保存',
@@ -167,6 +180,7 @@ export const text: Record<Language, AppText> = {
     },
     dialogs: {
       chooseMarkdownDir: '选择 Markdown 目录',
+      chooseTextFile: '选择文本文件',
       openFailed: '打开失败',
       refreshFailed: '刷新失败',
       unsavedTitle: '未保存修改',
@@ -220,6 +234,9 @@ export const text: Record<Language, AppText> = {
       immersiveOnFailed: '沉浸模式开启失败',
       immersiveOffFailed: '沉浸模式关闭失败',
       closeFailed: '关闭失败',
+      loadingEditor: '正在加载编辑器',
+      loadingVisualEditor: '正在加载可视化编辑器',
+      editorLoadFailed: '编辑器加载失败',
       languageChanged: '已切换为中文'
     },
     labels: {
@@ -229,6 +246,11 @@ export const text: Record<Language, AppText> = {
       clearBackground: '清除背景图',
       chooseBackground: '选择背景图',
       immersiveMode: 'F11 沉浸模式',
+      fileMenu: '文件',
+      displayMenu: '样式',
+      renderEngine: '渲染引擎',
+      readingFocus: '渲染聚焦',
+      readingFocusTitle: '开启后阅读区只突出当前段落，其余内容变灰',
       dark: '深色',
       light: '亮色'
     },
@@ -268,6 +290,8 @@ export const text: Record<Language, AppText> = {
     languageName: 'English',
     dropText: 'Release to open text file',
     actions: {
+      open: 'Open',
+      openFile: 'Open file',
       openFolder: 'Open',
       refresh: 'Refresh',
       save: 'Save',
@@ -303,6 +327,7 @@ export const text: Record<Language, AppText> = {
     },
     dialogs: {
       chooseMarkdownDir: 'Choose Markdown folder',
+      chooseTextFile: 'Choose text file',
       openFailed: 'Open failed',
       refreshFailed: 'Refresh failed',
       unsavedTitle: 'Unsaved changes',
@@ -356,6 +381,9 @@ export const text: Record<Language, AppText> = {
       immersiveOnFailed: 'Failed to enter focus mode',
       immersiveOffFailed: 'Failed to exit focus mode',
       closeFailed: 'Close failed',
+      loadingEditor: 'Loading editor',
+      loadingVisualEditor: 'Loading visual editor',
+      editorLoadFailed: 'Editor failed to load',
       languageChanged: 'Switched to English'
     },
     labels: {
@@ -365,6 +393,11 @@ export const text: Record<Language, AppText> = {
       clearBackground: 'Clear background image',
       chooseBackground: 'Choose background image',
       immersiveMode: 'F11 focus mode',
+      fileMenu: 'File',
+      displayMenu: 'Style',
+      renderEngine: 'Renderer',
+      readingFocus: 'Render focus',
+      readingFocusTitle: 'Dim non-current reader blocks and highlight the current paragraph',
       dark: 'Dark',
       light: 'Light'
     },

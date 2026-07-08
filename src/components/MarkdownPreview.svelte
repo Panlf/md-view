@@ -1,50 +1,102 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { plusMarkdownStatus } from '../edition';
-  import { renderMarkdown } from '#markdown-renderer';
-  import { defaultPlusPreferences, type PlusPreferences } from '../plusPreferences';
-  import { openExternalUrl, validateLocalLinks } from '../tauri';
+  import { renderFastPreview, renderFullMarkdown } from '../markdown/renderers/deferred';
+  import { openExternalUrl, validateLocalLinks } from '../runtime';
   import type { Heading, LinkValidationResult } from '../types';
 
   export let content = '';
   export let outline: Heading[] = [];
   export let filePath = '';
-  export let preferences: PlusPreferences = defaultPlusPreferences;
+  export let preferences: unknown = undefined;
+  export let fallbackRenderStatus = '';
+  export let readingFocusEnabled = true;
 
   const dispatch = createEventDispatcher<{
     activeLine: number;
     openLocalFile: string;
     renderHtml: string;
     renderStatus: string;
+    readingProgress: number;
     linkStatus: { broken: number; total: number };
   }>();
   let html = '';
   let previewHost: HTMLElement;
   let renderToken = 0;
-  let activeObserver: IntersectionObserver | undefined;
+  let scrollFrame = 0;
+  let resizeObserver: ResizeObserver | undefined;
+  let currentReadingBlock: HTMLElement | null = null;
+  let lastActiveLine = 0;
+  let lastReadingProgress = -1;
   let imageOverlay: { src: string; source: string; scale: number } | null = null;
+  let deferredRenderTimer = 0;
+  $: if (!readingFocusEnabled) {
+    currentReadingBlock?.classList.remove('current-reading-block');
+    currentReadingBlock = null;
+  } else {
+    scheduleReadingPositionUpdate();
+  }
 
   onMount(() => {
     previewHost.addEventListener('click', handleClick);
+    previewHost.addEventListener('scroll', scheduleReadingPositionUpdate, { passive: true });
+    previewHost.addEventListener('load', scheduleReadingPositionUpdate, true);
+    resizeObserver = new ResizeObserver(scheduleReadingPositionUpdate);
+    resizeObserver.observe(previewHost);
     return () => {
       previewHost.removeEventListener('click', handleClick);
-      activeObserver?.disconnect();
+      previewHost.removeEventListener('scroll', scheduleReadingPositionUpdate);
+      previewHost.removeEventListener('load', scheduleReadingPositionUpdate, true);
+      resizeObserver?.disconnect();
+      if (scrollFrame) {
+        cancelAnimationFrame(scrollFrame);
+      }
+      if (deferredRenderTimer) {
+        clearTimeout(deferredRenderTimer);
+      }
     };
   });
 
   $: void renderPreview(content, outline, filePath, preferences);
 
-  async function renderPreview(source: string, headings: Heading[], markdownPath: string, prefs: PlusPreferences) {
+  async function renderPreview(source: string, headings: Heading[], markdownPath: string, prefs: unknown) {
     const token = ++renderToken;
+    if (deferredRenderTimer) {
+      clearTimeout(deferredRenderTimer);
+      deferredRenderTimer = 0;
+    }
+
     try {
-      const result = await renderMarkdown(source, headings, markdownPath, prefs);
-      if (token !== renderToken) return;
-      html = result.html;
-      dispatch('renderStatus', result.status);
-      dispatch('renderHtml', result.html);
+      const quick = renderFastPreview(source, headings, markdownPath);
+      applyRenderResult(quick, false);
       await tickAfterHtml();
-      observeHeadings();
-      if (prefs.validateLocalLinks && result.linkTargets?.length) {
+      if (token !== renderToken) return;
+      resetReadingPosition();
+      updateReadingPosition();
+      deferredRenderTimer = window.setTimeout(() => {
+        deferredRenderTimer = 0;
+        void renderFullPreview(source, headings, markdownPath, prefs, token);
+      }, 0);
+    } catch (error) {
+      if (token !== renderToken) return;
+      html = `<pre class="markdown-render-error">${escapeHtml(String(error))}</pre>`;
+      dispatch('renderStatus', fallbackRenderStatus);
+      dispatch('renderHtml', html);
+      await tickAfterHtml();
+      resetReadingPosition();
+      updateReadingPosition();
+    }
+  }
+
+  async function renderFullPreview(source: string, headings: Heading[], markdownPath: string, prefs: unknown, token: number) {
+    try {
+      const result = await renderFullMarkdown(source, headings, markdownPath, prefs);
+      if (token !== renderToken) return;
+      applyRenderResult(result, true);
+      await tickAfterHtml();
+      if (token !== renderToken) return;
+      resetReadingPosition();
+      updateReadingPosition();
+      if (shouldValidateLocalLinks(prefs) && result.linkTargets?.length) {
         const validation = await validateLocalLinks(markdownPath, result.linkTargets);
         if (token === renderToken) {
           applyLinkValidation(validation);
@@ -55,14 +107,27 @@
     } catch (error) {
       if (token !== renderToken) return;
       html = `<pre class="markdown-render-error">${escapeHtml(String(error))}</pre>`;
-      dispatch('renderStatus', plusMarkdownStatus);
+      dispatch('renderStatus', fallbackRenderStatus);
       dispatch('renderHtml', html);
+      await tickAfterHtml();
+      resetReadingPosition();
+      updateReadingPosition();
+    }
+  }
+
+  function applyRenderResult(result: { html: string; status: string }, isComplete: boolean) {
+    html = result.html;
+    dispatch('renderStatus', isComplete ? result.status : `${result.status}...`);
+    dispatch('renderHtml', isComplete ? result.html : '');
+    if (!isComplete) {
+      dispatch('linkStatus', { broken: 0, total: 0 });
     }
   }
 
   export function scrollToLine(line: number) {
     const target = previewHost?.querySelector(`[data-outline-line="${line}"]`);
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    scheduleReadingPositionUpdate();
   }
 
   function handleClick(event: MouseEvent) {
@@ -88,17 +153,17 @@
       return;
     }
 
-    const externalLink = target?.closest('a[href]');
-    if (externalLink instanceof HTMLAnchorElement && isExternalUrl(externalLink.href)) {
-      event.preventDefault();
-      void openExternalUrl(externalLink.href);
-      return;
-    }
-
     const anchorLink = target?.closest('a[data-local-anchor]');
     if (anchorLink instanceof HTMLAnchorElement) {
       event.preventDefault();
       scrollToAnchor(anchorLink.dataset.localAnchor ?? '');
+      return;
+    }
+
+    const externalLink = target?.closest('a[href]');
+    if (externalLink instanceof HTMLAnchorElement && isExternalUrl(externalLink.href)) {
+      event.preventDefault();
+      void openExternalUrl(externalLink.href);
       return;
     }
 
@@ -116,21 +181,98 @@
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
-  function observeHeadings() {
-    activeObserver?.disconnect();
-    if (!preferences.syncScroll || !previewHost) return;
-    const headings = Array.from(previewHost.querySelectorAll<HTMLElement>('[data-outline-line]'));
-    activeObserver = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top)[0];
-        const line = Number((visible?.target as HTMLElement | undefined)?.dataset.outlineLine);
-        if (line) dispatch('activeLine', line);
-      },
-      { root: previewHost, rootMargin: '-8% 0px -72% 0px', threshold: [0, 1] }
-    );
-    headings.forEach((heading) => activeObserver?.observe(heading));
+  function scheduleReadingPositionUpdate() {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      updateReadingPosition();
+    });
+  }
+
+  function resetReadingPosition() {
+    currentReadingBlock?.classList.remove('current-reading-block');
+    currentReadingBlock = null;
+    lastActiveLine = -1;
+    lastReadingProgress = -1;
+  }
+
+  function updateReadingPosition() {
+    if (!previewHost) return;
+    const progress = calculateReadingProgress();
+    if (progress !== lastReadingProgress) {
+      lastReadingProgress = progress;
+      dispatch('readingProgress', progress);
+    }
+
+    const nextBlock = findCurrentReadingBlock();
+    if (!readingFocusEnabled) {
+      currentReadingBlock?.classList.remove('current-reading-block');
+      currentReadingBlock = null;
+    } else if (nextBlock !== currentReadingBlock) {
+      currentReadingBlock?.classList.remove('current-reading-block');
+      nextBlock?.classList.add('current-reading-block');
+      currentReadingBlock = nextBlock;
+    }
+
+    const activeLine = findActiveHeadingLine(nextBlock);
+    if (activeLine !== lastActiveLine) {
+      lastActiveLine = activeLine;
+      dispatch('activeLine', activeLine);
+    }
+  }
+
+  function calculateReadingProgress() {
+    const maxScroll = previewHost.scrollHeight - previewHost.clientHeight;
+    if (maxScroll <= 0) return 100;
+    return Math.max(0, Math.min(100, Math.round((previewHost.scrollTop / maxScroll) * 100)));
+  }
+
+  function findCurrentReadingBlock() {
+    const blocks = getReadingBlocks();
+    if (blocks.length === 0) return null;
+    const hostRect = previewHost.getBoundingClientRect();
+    const focusY = hostRect.top + hostRect.height * 0.25;
+    let candidate: HTMLElement | null = null;
+
+    for (const block of blocks) {
+      const rect = block.getBoundingClientRect();
+      if (rect.height <= 0 || rect.bottom < hostRect.top) continue;
+      if (rect.top <= focusY && rect.bottom >= focusY) {
+        return block;
+      }
+      if (rect.top <= focusY) {
+        candidate = block;
+        continue;
+      }
+      if (candidate) return candidate;
+      return block;
+    }
+
+    return candidate ?? blocks[blocks.length - 1] ?? null;
+  }
+
+  function getReadingBlocks() {
+    if (!previewHost) return [];
+    return Array.from(
+      previewHost.querySelectorAll<HTMLElement>(
+        ':scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > p, :scope > ul, :scope > ol, :scope > blockquote, :scope > dl, :scope > details, :scope > figure, :scope > pre, :scope > table, :scope > nav, :scope > section, :scope > .markdown-mermaid, :scope > .markdown-properties, :scope > .markdown-frontmatter'
+      )
+    ).filter((block) => block.offsetParent !== null && block.getBoundingClientRect().height > 0);
+  }
+
+  function findActiveHeadingLine(block: HTMLElement | null) {
+    if (!block) return 0;
+    const ownLine = Number(block.dataset.outlineLine);
+    if (ownLine) return ownLine;
+    let cursor: Element | null = block.previousElementSibling;
+    while (cursor) {
+      if (cursor instanceof HTMLElement) {
+        const line = Number(cursor.dataset.outlineLine);
+        if (line) return line;
+      }
+      cursor = cursor.previousElementSibling;
+    }
+    return 0;
   }
 
   function applyLinkValidation(results: LinkValidationResult[]) {
@@ -148,6 +290,10 @@
       });
     }
     dispatch('linkStatus', { broken: broken.length, total: results.length });
+  }
+
+  function shouldValidateLocalLinks(value: unknown) {
+    return Boolean((value as { validateLocalLinks?: boolean } | undefined)?.validateLocalLinks);
   }
 
   function handleMermaidAction(button: HTMLButtonElement) {
@@ -217,7 +363,7 @@
   }
 </script>
 
-<article bind:this={previewHost} class="markdown-preview">
+<article bind:this={previewHost} class="markdown-preview" class:reading-focus-enabled={readingFocusEnabled}>
   {@html html}
 </article>
 

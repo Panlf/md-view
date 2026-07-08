@@ -138,8 +138,8 @@ fn open_path(app: AppHandle, path: String) -> AppResult<OpenPathResult> {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
         allow_asset_directory(&app, &workspace_path)?;
-        let tree = scan_directory(&workspace_path)?;
         let file = read_file_path(&source_path)?;
+        let tree = workspace_stub_tree(&workspace_path, &source_path)?;
 
         return Ok(OpenPathResult {
             kind: "file".into(),
@@ -151,6 +151,32 @@ fn open_path(app: AppHandle, path: String) -> AppResult<OpenPathResult> {
     }
 
     Err("路径不存在或无法访问".into())
+}
+
+fn workspace_stub_tree(workspace_path: &Path, file_path: &Path) -> AppResult<FileNode> {
+    let workspace_metadata = fs::metadata(workspace_path).map_err(to_error)?;
+    let file_metadata = fs::metadata(file_path).map_err(to_error)?;
+    Ok(FileNode {
+        path: normalize_path(workspace_path),
+        name: workspace_path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| normalize_path(workspace_path)),
+        kind: "directory".into(),
+        children: vec![FileNode {
+            path: normalize_path(file_path),
+            name: file_path
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_else(|| normalize_path(file_path)),
+            kind: "file".into(),
+            children: Vec::new(),
+            size: file_metadata.len(),
+            modified_at: system_time_to_ms(file_metadata.modified().ok()),
+        }],
+        size: workspace_metadata.len(),
+        modified_at: system_time_to_ms(workspace_metadata.modified().ok()),
+    })
 }
 
 #[tauri::command]

@@ -26,6 +26,7 @@ writeFileSync(generatedPath, `${JSON.stringify(overlay, null, 2)}\n`);
 const tauriBin = join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tauri.cmd' : 'tauri');
 const tauriBuildArgs = buildArgs.length > 0 ? buildArgs : ['--bundles', 'nsis'];
 const buildStartedAt = Date.now();
+const rootReleaseDir = join(root, 'release');
 const result = spawnSync(tauriBin, ['build', ...tauriBuildArgs, '--config', generatedPath], {
   cwd: root,
   shell: process.platform === 'win32',
@@ -42,8 +43,12 @@ if (result.status === 0) {
   const editionExe = join(releaseDir, `md-view-${edition}.exe`);
 
   if (existsSync(sourceExe)) {
-    copyFileSync(sourceExe, editionExe);
+    mkdirSync(rootReleaseDir, { recursive: true });
+    copyFileWithRetry(sourceExe, editionExe);
     console.log(`Edition exe copied to: ${editionExe}`);
+    const portableExe = join(rootReleaseDir, `md-view-${edition}_${overlay.version}_${platformTarget()}-portable.exe`);
+    copyFileWithRetry(sourceExe, portableExe);
+    console.log(`Portable exe copied to: ${portableExe}`);
   }
 
   copyEditionBundleArtifacts(releaseDir, edition, overlay, buildStartedAt);
@@ -81,10 +86,56 @@ function copyEditionBundleArtifacts(releaseDir, edition, overlay, buildStartedAt
     const editionPath = join(dirname(filePath), editionName);
 
     if (editionPath !== filePath) {
-      copyFileSync(filePath, editionPath);
+      copyFileWithRetry(filePath, editionPath);
       console.log(`Edition bundle copied to: ${editionPath}`);
     }
+
+    mkdirSync(rootReleaseDir, { recursive: true });
+    const rootReleasePath = join(rootReleaseDir, editionName);
+    copyFileWithRetry(filePath, rootReleasePath);
+    console.log(`Release artifact copied to: ${rootReleasePath}`);
   }
+}
+
+function platformTarget() {
+  const platform = {
+    darwin: 'macos',
+    linux: 'linux',
+    win32: 'windows'
+  }[process.platform] ?? process.platform;
+  const arch = {
+    arm64: 'arm64',
+    x64: 'x64'
+  }[process.arch] ?? process.arch;
+  return `${platform}-${arch}`;
+}
+
+function copyFileWithRetry(source, destination, attempts = 12) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      copyFileSync(source, destination);
+      return;
+    } catch (error) {
+      const retryable = ['EBUSY', 'EPERM'].includes(error?.code);
+
+      if (!retryable || attempt === attempts) {
+        if (retryable) {
+          console.error(
+            `Could not copy edition artifact after ${attempts} attempts. ` +
+              `Close any running app that may be using ${destination} and retry.`
+          );
+        }
+
+        throw error;
+      }
+
+      sleep(500);
+    }
+  }
+}
+
+function sleep(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
 function listFiles(dir) {

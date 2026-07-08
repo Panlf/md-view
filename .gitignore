@@ -38,6 +38,6 @@ Desktop.ini
 .env.*
 !.env.example
 
-# Manually copied release artifacts
+# Local and CI-copied release artifacts
 release/
 releases/

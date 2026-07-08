@@ -27,6 +27,14 @@ md-view 是一个本地 Markdown 阅读和编辑器，使用 Tauri 2 + Svelte + 
 - 支持主题切换和阅读区背景图
 - 支持 Windows 默认应用设置入口
 
+## Edition 开发策略
+
+md-view 现在按 Lite / Plus 两个 edition 维护：
+
+- Plus 是主开发基准。新增功能默认先进入 Plus，`plus` 分支是主要开发分支，常规验证也优先覆盖 Plus。
+- Lite 保持体积精简。Lite 只接受缺陷修复、兼容性修复，以及明确指定的简单轻量功能；默认不引入 Plus 的完整 Markdown 渲染、导出、索引和高级阅读设置依赖。
+- 默认开发和打包命令指向 Plus。需要构建 Lite 时使用显式的 `:*:lite` 命令。
+
 ## 本地开发
 
 需要先安装：
@@ -42,6 +50,12 @@ npm install
 npm run tauri:dev
 ```
 
+默认 `npm run tauri:dev` 启动 Plus。Lite 开发使用：
+
+```bash
+npm run tauri:dev:lite
+```
+
 ## 本地打包
 
 ```bash
@@ -49,11 +63,21 @@ npm install
 npm run tauri:build
 ```
 
+默认 `npm run tauri:build` 打包 Plus。常用 edition 命令：
+
+```bash
+npm run tauri:build:plus
+npm run tauri:build:lite
+npm run tauri:build:both
+```
+
 打包产物在：
 
 ```text
 src-tauri/target/release/bundle/
 ```
+
+Edition 构建脚本还会把规范化命名的安装包和 portable exe 复制到根目录 `release/`，供本地分发和 CI 上传使用。
 
 当前配置会生成当前系统支持的包：
 
@@ -86,16 +110,17 @@ sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev lib
 
 仓库包含 `.github/workflows/build.yml`：
 
-- push 到 `main` / `master` 时构建全平台
-- pull request 到 `main` / `master` 时运行构建检查
+- push 到 `plus` / `main` / `master` 时构建全平台
+- pull request 到 `plus` / `main` / `master` 时运行构建检查
+- 构建矩阵覆盖 Lite / Plus 两个 edition，并在上传产物名里包含 edition 和版本号
 - 手动运行 workflow 时构建全平台
 - 推送 `v*` tag 时会创建草稿 Release 并上传构建产物
 
 示例：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 ## 贡献说明
