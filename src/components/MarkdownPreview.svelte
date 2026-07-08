@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { renderMarkdown } from '#markdown-renderer';
+  import { renderFastPreview, renderFullMarkdown } from '../markdown/renderers/deferred';
   import { openExternalUrl, validateLocalLinks } from '../runtime';
   import type { Heading, LinkValidationResult } from '../types';
 
@@ -9,6 +9,7 @@
   export let filePath = '';
   export let preferences: unknown = undefined;
   export let fallbackRenderStatus = '';
+  export let readingFocusEnabled = true;
 
   const dispatch = createEventDispatcher<{
     activeLine: number;
@@ -27,6 +28,13 @@
   let lastActiveLine = 0;
   let lastReadingProgress = -1;
   let imageOverlay: { src: string; source: string; scale: number } | null = null;
+  let deferredRenderTimer = 0;
+  $: if (!readingFocusEnabled) {
+    currentReadingBlock?.classList.remove('current-reading-block');
+    currentReadingBlock = null;
+  } else {
+    scheduleReadingPositionUpdate();
+  }
 
   onMount(() => {
     previewHost.addEventListener('click', handleClick);
@@ -42,6 +50,9 @@
       if (scrollFrame) {
         cancelAnimationFrame(scrollFrame);
       }
+      if (deferredRenderTimer) {
+        clearTimeout(deferredRenderTimer);
+      }
     };
   });
 
@@ -49,13 +60,40 @@
 
   async function renderPreview(source: string, headings: Heading[], markdownPath: string, prefs: unknown) {
     const token = ++renderToken;
+    if (deferredRenderTimer) {
+      clearTimeout(deferredRenderTimer);
+      deferredRenderTimer = 0;
+    }
+
     try {
-      const result = await renderMarkdown(source, headings, markdownPath, prefs);
-      if (token !== renderToken) return;
-      html = result.html;
-      dispatch('renderStatus', result.status);
-      dispatch('renderHtml', result.html);
+      const quick = renderFastPreview(source, headings, markdownPath);
+      applyRenderResult(quick, false);
       await tickAfterHtml();
+      if (token !== renderToken) return;
+      resetReadingPosition();
+      updateReadingPosition();
+      deferredRenderTimer = window.setTimeout(() => {
+        deferredRenderTimer = 0;
+        void renderFullPreview(source, headings, markdownPath, prefs, token);
+      }, 0);
+    } catch (error) {
+      if (token !== renderToken) return;
+      html = `<pre class="markdown-render-error">${escapeHtml(String(error))}</pre>`;
+      dispatch('renderStatus', fallbackRenderStatus);
+      dispatch('renderHtml', html);
+      await tickAfterHtml();
+      resetReadingPosition();
+      updateReadingPosition();
+    }
+  }
+
+  async function renderFullPreview(source: string, headings: Heading[], markdownPath: string, prefs: unknown, token: number) {
+    try {
+      const result = await renderFullMarkdown(source, headings, markdownPath, prefs);
+      if (token !== renderToken) return;
+      applyRenderResult(result, true);
+      await tickAfterHtml();
+      if (token !== renderToken) return;
       resetReadingPosition();
       updateReadingPosition();
       if (shouldValidateLocalLinks(prefs) && result.linkTargets?.length) {
@@ -74,6 +112,15 @@
       await tickAfterHtml();
       resetReadingPosition();
       updateReadingPosition();
+    }
+  }
+
+  function applyRenderResult(result: { html: string; status: string }, isComplete: boolean) {
+    html = result.html;
+    dispatch('renderStatus', isComplete ? result.status : `${result.status}...`);
+    dispatch('renderHtml', isComplete ? result.html : '');
+    if (!isComplete) {
+      dispatch('linkStatus', { broken: 0, total: 0 });
     }
   }
 
@@ -106,17 +153,17 @@
       return;
     }
 
-    const externalLink = target?.closest('a[href]');
-    if (externalLink instanceof HTMLAnchorElement && isExternalUrl(externalLink.href)) {
-      event.preventDefault();
-      void openExternalUrl(externalLink.href);
-      return;
-    }
-
     const anchorLink = target?.closest('a[data-local-anchor]');
     if (anchorLink instanceof HTMLAnchorElement) {
       event.preventDefault();
       scrollToAnchor(anchorLink.dataset.localAnchor ?? '');
+      return;
+    }
+
+    const externalLink = target?.closest('a[href]');
+    if (externalLink instanceof HTMLAnchorElement && isExternalUrl(externalLink.href)) {
+      event.preventDefault();
+      void openExternalUrl(externalLink.href);
       return;
     }
 
@@ -158,7 +205,10 @@
     }
 
     const nextBlock = findCurrentReadingBlock();
-    if (nextBlock !== currentReadingBlock) {
+    if (!readingFocusEnabled) {
+      currentReadingBlock?.classList.remove('current-reading-block');
+      currentReadingBlock = null;
+    } else if (nextBlock !== currentReadingBlock) {
       currentReadingBlock?.classList.remove('current-reading-block');
       nextBlock?.classList.add('current-reading-block');
       currentReadingBlock = nextBlock;
@@ -313,7 +363,7 @@
   }
 </script>
 
-<article bind:this={previewHost} class="markdown-preview">
+<article bind:this={previewHost} class="markdown-preview" class:reading-focus-enabled={readingFocusEnabled}>
   {@html html}
 </article>
 

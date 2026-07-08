@@ -4,6 +4,7 @@
 interface ImportMetaEnv {
   readonly VITE_MD_VIEW_EDITION?: 'lite' | 'plus';
   readonly VITE_MD_VIEW_VERSION?: string;
+  readonly VITE_MD_VIEW_TARGET?: 'desktop' | 'web';
 }
 
 declare module '#markdown-renderer' {

@@ -180,6 +180,27 @@ button:disabled {
   white-space: nowrap;
 }
 
+.toolbar .toolbar-icon-button {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+.toolbar .toolbar-icon-button .button-icon {
+  margin-right: 0;
+}
+
+.button-icon,
+.menu-icon {
+  display: inline-flex;
+  min-width: 1.2em;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  font-size: 0.95em;
+  line-height: 1;
+}
+
 .toolbar .language-button {
   min-width: 38px;
   padding: 0 10px;
@@ -211,6 +232,87 @@ button:disabled {
 
 .default-app-button {
   min-width: 74px;
+}
+
+.toolbar-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.toolbar-menu-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: grid;
+  width: 236px;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.toolbar-menu-popover.display-menu {
+  width: 264px;
+}
+
+.toolbar-center .toolbar-menu-popover {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.toolbar-menu-popover button {
+  width: 100%;
+  justify-content: center;
+}
+
+.toolbar-menu-check,
+.toolbar-menu-field {
+  display: grid;
+  gap: 6px;
+  color: var(--panel-muted);
+  font-size: 13px;
+}
+
+.toolbar-menu-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.toolbar-menu-check input {
+  width: 34px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.toolbar-menu-field select {
+  min-height: 32px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  padding: 0 10px;
+}
+
+.toolbar-menu-info {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+.toolbar-menu-info strong {
+  color: var(--panel-text);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .panel-icon-button,
@@ -310,18 +412,6 @@ button:disabled {
 .status-line span {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.edition-badge {
-  flex: 0 0 auto;
-  max-width: none;
-  padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
-  border-radius: 999px;
-  background: var(--selected-bg);
-  color: var(--selected-text);
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .muted {
@@ -743,13 +833,6 @@ button:disabled {
   text-decoration-color: var(--dirty-text);
 }
 
-.markdown-preview .current-reading-block {
-  border-radius: 7px;
-  box-shadow:
-    -6px 0 0 -2px color-mix(in srgb, var(--primary) 72%, transparent),
-    0 0 0 6px color-mix(in srgb, var(--selected-bg) 28%, transparent);
-}
-
 .markdown-preview p,
 .markdown-preview ul,
 .markdown-preview ol,
@@ -760,6 +843,43 @@ button:disabled {
 .markdown-preview pre,
 .markdown-preview table {
   margin: 0.85em 0;
+}
+
+.markdown-preview.reading-focus-enabled > h1,
+.markdown-preview.reading-focus-enabled > h2,
+.markdown-preview.reading-focus-enabled > h3,
+.markdown-preview.reading-focus-enabled > h4,
+.markdown-preview.reading-focus-enabled > h5,
+.markdown-preview.reading-focus-enabled > h6,
+.markdown-preview.reading-focus-enabled > p,
+.markdown-preview.reading-focus-enabled > ul,
+.markdown-preview.reading-focus-enabled > ol,
+.markdown-preview.reading-focus-enabled > blockquote,
+.markdown-preview.reading-focus-enabled > dl,
+.markdown-preview.reading-focus-enabled > details,
+.markdown-preview.reading-focus-enabled > figure,
+.markdown-preview.reading-focus-enabled > pre,
+.markdown-preview.reading-focus-enabled > table,
+.markdown-preview.reading-focus-enabled > nav,
+.markdown-preview.reading-focus-enabled > section,
+.markdown-preview.reading-focus-enabled > .markdown-mermaid,
+.markdown-preview.reading-focus-enabled > .markdown-properties,
+.markdown-preview.reading-focus-enabled > .markdown-frontmatter {
+  opacity: 0.42;
+  filter: grayscale(0.45);
+  transition:
+    opacity 120ms ease,
+    filter 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.markdown-preview.reading-focus-enabled > .current-reading-block {
+  opacity: 1;
+  filter: none;
+  border-radius: 7px;
+  box-shadow:
+    -6px 0 0 -2px color-mix(in srgb, var(--primary) 72%, transparent),
+    0 0 0 6px color-mix(in srgb, var(--selected-bg) 24%, transparent);
 }
 
 .markdown-preview ul,
@@ -1257,21 +1377,49 @@ button:disabled {
 .plus-settings-body {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 10px;
   overflow: auto;
   padding: 16px;
 }
 
-.plus-settings-body label {
+.plus-settings-section {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-bg) 88%, var(--content-bg));
+}
+
+.plus-settings-section summary {
+  min-height: 38px;
+  padding: 9px 12px;
+  color: var(--panel-text);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.plus-settings-section summary::marker {
+  color: var(--primary);
+}
+
+.plus-settings-section-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.plus-settings-section-body label {
   display: grid;
   gap: 6px;
   color: var(--panel-muted);
   font-size: 13px;
 }
 
-.plus-settings-body select,
-.plus-settings-body input[type='search'] {
+.plus-settings-section-body select,
+.plus-settings-section-body input[type='search'] {
   min-height: 32px;
+}
+
+.plus-settings-section-body input[type='range'] {
+  width: 100%;
 }
 
 .plus-check {
@@ -1281,6 +1429,10 @@ button:disabled {
 
 .plus-check input {
   accent-color: var(--primary);
+}
+
+.plus-export-actions {
+  grid-template-columns: 1fr 1fr;
 }
 
 .plus-settings-actions {
@@ -1382,6 +1534,22 @@ button:disabled {
 .web-plus-file-button {
   min-height: 32px;
   white-space: nowrap;
+}
+
+.web-plus-check {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  color: var(--panel-muted);
+  white-space: nowrap;
+}
+
+.web-plus-check input {
+  width: 34px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
 }
 
 .web-plus-file-button {

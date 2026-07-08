@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import MarkdownEditor from './components/MarkdownEditor.svelte';
   import MarkdownPreview from './components/MarkdownPreview.svelte';
   import PlusSettingsPanel from './components/PlusSettingsPanel.svelte';
   import { appVersion, editionDisplayName, plusMarkdownStatus } from './edition';
+  import { extractHeadingsFromMarkdown } from './outline';
   import { applyTheme, findTheme, THEME_STORAGE_KEY, themes } from './themes';
   import {
     defaultPlusPreferences,
@@ -12,7 +12,6 @@
     savePlusPreferences,
     type PlusPreferences
   } from './plusPreferences';
-  import type { Heading } from './types';
   import type { AppTheme } from './types';
 
   type WebViewMode = 'source' | 'split' | 'read';
@@ -62,20 +61,45 @@ flowchart LR
   let renderStatus = plusMarkdownStatus;
   let renderedHtml = '';
   let readingProgress = 0;
+  let readingFocusEnabled = true;
   let selectedTheme: AppTheme = themes[0];
-  let editorRef: MarkdownEditor;
+  let MarkdownEditorComponent: any = null;
+  let editorLoadPromise: Promise<void> | null = null;
+  let editorRef: any;
 
   $: appTitle = appVersion ? `${editionDisplayName} ${appVersion}` : editionDisplayName;
-  $: outline = extractHeadings(content);
+  $: outline = extractHeadingsFromMarkdown(content);
   $: contentPaneStyle = plusReaderStyle(preferences);
   $: wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
   $: charCount = content.length;
 
   onMount(() => {
     preferences = loadPlusPreferences();
+    readingFocusEnabled = localStorage.getItem('md-view-reading-focus-enabled') !== 'false';
     selectedTheme = findTheme(localStorage.getItem(THEME_STORAGE_KEY));
     applyTheme(selectedTheme);
+    void ensureMarkdownEditorLoaded();
   });
+
+  async function ensureMarkdownEditorLoaded() {
+    if (MarkdownEditorComponent) return;
+    editorLoadPromise ??= import('./components/MarkdownEditor.svelte').then((module) => {
+      MarkdownEditorComponent = module.default;
+    });
+    await editorLoadPromise;
+  }
+
+  function setMode(next: WebViewMode) {
+    mode = next;
+    if (next !== 'read') {
+      void ensureMarkdownEditorLoaded();
+    }
+  }
+
+  function updateReadingFocusEnabled(enabled: boolean) {
+    readingFocusEnabled = enabled;
+    localStorage.setItem('md-view-reading-focus-enabled', String(enabled));
+  }
 
   function updatePreferences(next: PlusPreferences) {
     preferences = next;
@@ -147,33 +171,6 @@ flowchart LR
     return trimmed || fallback;
   }
 
-  function extractHeadings(markdown: string): Heading[] {
-    return markdown
-      .split(/\r?\n/)
-      .map((line, index) => ({ line, index }))
-      .filter(({ line }) => /^#{1,6}\s+\S/.test(line))
-      .map(({ line, index }) => {
-        const match = line.match(/^(#{1,6})\s+(.+)$/);
-        const text = (match?.[2] ?? '').replace(/[#\s]+$/g, '').trim();
-        return {
-          level: match?.[1].length ?? 1,
-          text,
-          line: index + 1,
-          anchor: slugHeading(text, index)
-        };
-      });
-  }
-
-  function slugHeading(text: string, index: number) {
-    const slug = text
-      .trim()
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s-]/gu, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-');
-    return slug ? `heading-${slug}` : `heading-${index + 1}`;
-  }
-
   function escapeHtml(value: string) {
     return value.replace(/[&<>"']/g, (char) => {
       switch (char) {
@@ -208,6 +205,14 @@ flowchart LR
       <button type="button" on:click={downloadHtml}>下载 HTML</button>
       <button type="button" on:click={() => window.print()}>打印/PDF</button>
       <button type="button" on:click={() => (settingsOpen = true)}>Plus</button>
+      <label class="web-plus-check">
+        <input
+          type="checkbox"
+          checked={readingFocusEnabled}
+          on:change={(event) => updateReadingFocusEnabled(event.currentTarget.checked)}
+        />
+        <span>聚焦</span>
+      </label>
       <select value={selectedTheme.name} on:change={(event) => updateTheme(event.currentTarget.value)} aria-label="主题">
         {#each themes as theme}
           <option value={theme.name}>{theme.name}</option>
@@ -216,9 +221,9 @@ flowchart LR
     </div>
 
     <div class="segmented web-plus-modes" aria-label="视图">
-      <button type="button" class:active={mode === 'source'} on:click={() => (mode = 'source')}>源码</button>
-      <button type="button" class:active={mode === 'split'} on:click={() => (mode = 'split')}>分屏</button>
-      <button type="button" class:active={mode === 'read'} on:click={() => (mode = 'read')}>阅读</button>
+      <button type="button" class:active={mode === 'source'} on:click={() => setMode('source')}>源码</button>
+      <button type="button" class:active={mode === 'split'} on:click={() => setMode('split')}>分屏</button>
+      <button type="button" class:active={mode === 'read'} on:click={() => setMode('read')}>阅读</button>
     </div>
   </header>
 
@@ -226,7 +231,13 @@ flowchart LR
     {#if mode !== 'read'}
       <section class="web-plus-editor-panel">
         <input class="web-plus-title" bind:value={fileName} aria-label="文件名" />
-        <MarkdownEditor bind:this={editorRef} bind:value={content} />
+        {#if MarkdownEditorComponent}
+          <svelte:component this={MarkdownEditorComponent} bind:this={editorRef} bind:value={content} />
+        {:else}
+          <div class="empty-state">
+            <p>正在加载编辑器</p>
+          </div>
+        {/if}
       </section>
     {/if}
 
@@ -238,6 +249,7 @@ flowchart LR
           preferences={preferences}
           filePath={fileName}
           fallbackRenderStatus={plusMarkdownStatus}
+          {readingFocusEnabled}
           on:renderStatus={(event) => (renderStatus = event.detail)}
           on:renderHtml={(event) => (renderedHtml = event.detail)}
           on:readingProgress={(event) => (readingProgress = event.detail)}

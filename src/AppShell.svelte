@@ -5,18 +5,16 @@
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import FileTree from './components/FileTree.svelte';
-  import MarkdownEditor from './components/MarkdownEditor.svelte';
   import MarkdownPreview from './components/MarkdownPreview.svelte';
   import OutlinePanel from './components/OutlinePanel.svelte';
-  import VisualMarkdownEditor from './components/VisualMarkdownEditor.svelte';
   import { appVersion } from './edition';
   import { formatText, loadLanguage, nextLanguage, saveLanguage, text, type Language } from './i18n';
+  import { extractHeadingsFromMarkdown } from './outline';
   import { applyTheme, BACKGROUND_IMAGE_STORAGE_KEY, findTheme, THEME_STORAGE_KEY, themes } from './themes';
   import type { AppTheme, FileNode, Heading, ReadFileResult, ViewMode, WorkspaceHeading } from './types';
   import {
     clearWorkspaceDrafts,
     deleteDraft,
-    extractOutline,
     initialOpenPaths,
     openDefaultAppSettings,
     openPath,
@@ -59,6 +57,7 @@
   let linkStatus = { broken: 0, total: 0 };
   let activeOutlineLine = 0;
   let readingProgress = 0;
+  let readingFocusEnabled = true;
   let workspaceHeadings: WorkspaceHeading[] = [];
   let headingSearch = '';
   let headingIndexBusy = false;
@@ -66,6 +65,7 @@
   let defaultSettingsBusy = false;
   let dirty = false;
   let dropActive = false;
+  let openToolbarMenu: 'open' | 'file' | 'display' | null = null;
   let selectedTheme: AppTheme = themes[0];
   let backgroundImagePath = '';
   let backgroundImageUrl = '';
@@ -78,14 +78,20 @@
   let lastWindowTitle = '';
   let draftTimer: number | undefined;
   let outlineTimer: number | undefined;
-  let editorRef: MarkdownEditor;
+  let workspaceRefreshToken = 0;
+  let MarkdownEditorComponent: any = null;
+  let VisualMarkdownEditorComponent: any = null;
+  let editorLoadPromise: Promise<void> | null = null;
+  let visualEditorLoadPromise: Promise<void> | null = null;
+  let editorRef: any;
   let previewRef: MarkdownPreview;
-  let visualRef: VisualMarkdownEditor;
+  let visualRef: any;
 
   const LEFT_SIDEBAR_COLLAPSED_KEY = 'md-view-left-sidebar-collapsed';
   const RIGHT_SIDEBAR_COLLAPSED_KEY = 'md-view-right-sidebar-collapsed';
   const AUTO_SAVE_ENABLED_KEY = 'md-view-auto-save-enabled';
   const ASK_BEFORE_LEAVE_SAVE_KEY = 'md-view-ask-before-leave-save';
+  const READING_FOCUS_ENABLED_KEY = 'md-view-reading-focus-enabled';
   $: t = text[language];
   $: rootNodes = tree ? tree.children : [];
   $: fileName = selectedPath ? selectedPath.split(/[\\/]/).pop() ?? selectedPath : '';
@@ -101,6 +107,15 @@
   ].join('; ');
   $: readingProgressLabel = language === 'zh' ? `阅读 ${readingProgress}%` : `Read ${readingProgress}%`;
   $: void syncWindowTitle(fileName, dirty);
+
+  async function chooseFile() {
+    const selected = await open({
+      multiple: false,
+      title: t.dialogs.chooseTextFile
+    });
+    if (typeof selected !== 'string') return;
+    await loadPath(selected);
+  }
 
   async function chooseWorkspace() {
     const selected = await open({
@@ -133,6 +148,7 @@
           throw new Error('打开结果缺少文件内容');
         }
         await openReadResult(result.file);
+        void refreshWorkspaceInBackground(result.workspace_path);
       } else {
         status = t.status.folderOpened;
       }
@@ -148,10 +164,23 @@
     tree = nextTree;
     workspacePath = nextPath;
     if (refreshWorkspaceHeadings) {
-      void refreshHeadingIndex(nextPath);
+      window.setTimeout(() => {
+        void refreshHeadingIndex(nextPath);
+      }, 0);
     }
     if (resetFile) {
       clearCurrentFile();
+    }
+  }
+
+  async function refreshWorkspaceInBackground(path: string) {
+    const token = ++workspaceRefreshToken;
+    try {
+      const nextTree = await openWorkspace(path);
+      if (token !== workspaceRefreshToken || path !== workspacePath) return;
+      tree = nextTree;
+    } catch {
+      // The opened file is already available; keep the lightweight tree if a background refresh fails.
     }
   }
 
@@ -175,7 +204,9 @@
     try {
       tree = await openWorkspace(workspacePath);
       if (refreshWorkspaceHeadings) {
-        void refreshHeadingIndex(workspacePath);
+        window.setTimeout(() => {
+          void refreshHeadingIndex(workspacePath);
+        }, 0);
       }
       status = t.status.folderRefreshed;
     } catch (error) {
@@ -238,6 +269,8 @@
     mode = 'read';
     activeOutlineLine = 0;
     readingProgress = 0;
+    renderedHtml = '';
+    linkStatus = { broken: 0, total: 0 };
 
     const draft = askBeforeLeaveSave ? await readDraft(result.path) : null;
     if (draft && draft.content !== result.content) {
@@ -252,7 +285,7 @@
       }
     }
 
-    await updateOutlineNow();
+    updateOutlineNow();
     status = dirty ? t.status.draftRestored : t.status.fileOpened;
   }
 
@@ -301,6 +334,10 @@
     scheduleOutline();
   }
 
+  function handleEditorChange(event: CustomEvent<string>) {
+    setContent(event.detail);
+  }
+
   function scheduleDraft() {
     if (!askBeforeLeaveSave || !selectedPath || content === savedContent) return;
     window.clearTimeout(draftTimer);
@@ -325,8 +362,8 @@
     outlineTimer = window.setTimeout(updateOutlineNow, 250);
   }
 
-  async function updateOutlineNow() {
-    outline = await extractOutline(content);
+  function updateOutlineNow() {
+    outline = extractHeadingsFromMarkdown(content);
   }
 
   async function saveCurrent(overwrite = false): Promise<boolean> {
@@ -387,8 +424,56 @@
     editorRef?.focusLine(heading.line);
   }
 
-  function setMode(next: ViewMode) {
+  async function setMode(next: ViewMode) {
+    try {
+      if (next === 'edit' || next === 'split') {
+        await ensureMarkdownEditorLoaded();
+      }
+      if (next === 'visual') {
+        await ensureVisualEditorLoaded();
+      }
+    } catch (error) {
+      status = `${t.status.editorLoadFailed}: ${String(error)}`;
+      return;
+    }
     mode = next;
+  }
+
+  async function ensureMarkdownEditorLoaded() {
+    if (MarkdownEditorComponent) return;
+    status = t.status.loadingEditor;
+    editorLoadPromise ??= import('./components/MarkdownEditor.svelte').then((module) => {
+      MarkdownEditorComponent = module.default;
+    });
+    await editorLoadPromise;
+  }
+
+  async function ensureVisualEditorLoaded() {
+    if (VisualMarkdownEditorComponent) return;
+    status = t.status.loadingVisualEditor;
+    visualEditorLoadPromise ??= import('./components/VisualMarkdownEditor.svelte').then((module) => {
+      VisualMarkdownEditorComponent = module.default;
+    });
+    await visualEditorLoadPromise;
+  }
+
+  function toggleToolbarMenu(menu: 'open' | 'file' | 'display') {
+    openToolbarMenu = openToolbarMenu === menu ? null : menu;
+  }
+
+  function closeToolbarMenu() {
+    openToolbarMenu = null;
+  }
+
+  function handleWindowClick(event: MouseEvent) {
+    const target = event.target as Element | null;
+    if (target?.closest('.toolbar-menu')) return;
+    closeToolbarMenu();
+  }
+
+  function setReadingFocusEnabled(enabled: boolean) {
+    readingFocusEnabled = enabled;
+    localStorage.setItem(READING_FOCUS_ENABLED_KEY, String(enabled));
   }
 
   function setLeftSidebarCollapsed(collapsed: boolean) {
@@ -490,6 +575,7 @@
     applyTheme(selectedTheme);
     leftSidebarCollapsed = localStorage.getItem(LEFT_SIDEBAR_COLLAPSED_KEY) === 'true';
     rightSidebarCollapsed = localStorage.getItem(RIGHT_SIDEBAR_COLLAPSED_KEY) === 'true';
+    readingFocusEnabled = localStorage.getItem(READING_FOCUS_ENABLED_KEY) !== 'false';
     const storedAutoSave = localStorage.getItem(AUTO_SAVE_ENABLED_KEY);
     askBeforeLeaveSave =
       storedAutoSave !== null ? storedAutoSave === 'true' : localStorage.getItem(ASK_BEFORE_LEAVE_SAVE_KEY) === 'true';
@@ -650,6 +736,12 @@
       return;
     }
 
+    if (event.key === 'Escape' && openToolbarMenu) {
+      event.preventDefault();
+      closeToolbarMenu();
+      return;
+    }
+
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       void saveCurrent();
@@ -700,52 +792,192 @@
   });
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window on:click={handleWindowClick} on:keydown={handleKeydown} />
 
 <main class="shell" class:drop-active={dropActive} class:immersive={immersiveMode} data-drop-text={t.dropText}>
   <header class="toolbar" aria-hidden={immersiveMode}>
     <div class="toolbar-group">
-      <button class="primary" disabled={busy} on:click={chooseWorkspace}>{t.actions.openFolder}</button>
-      <button disabled={!workspacePath || busy} on:click={refreshWorkspace}>{t.actions.refresh}</button>
-      <button class:dirty disabled={!selectedPath || !dirty || busy} on:click={() => saveCurrent()}>{t.actions.save}</button>
+      <div class="toolbar-menu">
+        <button
+          class="primary"
+          class:active={openToolbarMenu === 'open'}
+          disabled={busy}
+          aria-haspopup="menu"
+          aria-expanded={openToolbarMenu === 'open'}
+          on:click|stopPropagation={() => toggleToolbarMenu('open')}
+        >
+          <span class="button-icon" aria-hidden="true">📂</span>
+          {t.actions.open}
+        </button>
+        {#if openToolbarMenu === 'open'}
+          <div class="toolbar-menu-popover" role="menu" tabindex="-1" on:mousedown|stopPropagation>
+            <button
+              type="button"
+              disabled={busy}
+              on:click={() => {
+                closeToolbarMenu();
+                void chooseFile();
+              }}
+            >
+              <span class="button-icon" aria-hidden="true">📄</span>
+              {t.actions.openFile}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              on:click={() => {
+                closeToolbarMenu();
+                void chooseWorkspace();
+              }}
+            >
+              <span class="button-icon" aria-hidden="true">📁</span>
+              {t.actions.openFolder}
+            </button>
+          </div>
+        {/if}
+      </div>
       <button
-        class="default-app-button"
-        disabled={busy || defaultSettingsBusy}
-        title={t.labels.defaultAppTitle}
-        aria-label={t.labels.defaultAppTitle}
-        on:click={openDefaultSettings}
+        class="toolbar-icon-button"
+        disabled={!workspacePath || busy}
+        title={t.actions.refresh}
+        aria-label={t.actions.refresh}
+        on:click={refreshWorkspace}
       >
-        {defaultSettingsBusy ? t.actions.setting : t.actions.setDefault}
+        <span class="button-icon" aria-hidden="true">🔄</span>
       </button>
-      {#if hasSettingsPanel}
-        <button class:active={settingsOpen} title={settingsButtonTitle} on:click={() => (settingsOpen = true)}>{settingsButtonLabel}</button>
-      {/if}
+      <button
+        class="toolbar-icon-button"
+        class:dirty
+        disabled={!selectedPath || !dirty || busy}
+        title={t.actions.save}
+        aria-label={t.actions.save}
+        on:click={() => void saveCurrent()}
+      >
+        <span class="button-icon" aria-hidden="true">💾</span>
+      </button>
+      <div class="toolbar-menu">
+        <button
+          class:active={openToolbarMenu === 'file'}
+          aria-haspopup="menu"
+          aria-expanded={openToolbarMenu === 'file'}
+          on:click|stopPropagation={() => toggleToolbarMenu('file')}
+        >
+          <span class="button-icon" aria-hidden="true">📁</span>
+          {t.labels.fileMenu}
+        </button>
+        {#if openToolbarMenu === 'file'}
+          <div class="toolbar-menu-popover" role="menu" tabindex="-1" on:mousedown|stopPropagation>
+            <button
+              type="button"
+              disabled={busy || defaultSettingsBusy}
+              title={t.labels.defaultAppTitle}
+              on:click={() => {
+                closeToolbarMenu();
+                void openDefaultSettings();
+              }}
+            >
+              <span class="button-icon" aria-hidden="true">⭐</span>
+              {defaultSettingsBusy ? t.actions.setting : t.actions.setDefault}
+            </button>
+            <label class="toolbar-menu-check" title={t.labels.autoSaveTitle}>
+              <input
+                type="checkbox"
+                checked={askBeforeLeaveSave}
+                on:change={(event) => void setAskBeforeLeaveSave(event.currentTarget.checked)}
+              />
+              <span><span class="menu-icon" aria-hidden="true">💾</span>{t.actions.autoSave}</span>
+            </label>
+            {#if renderStatus}
+              <div class="toolbar-menu-info">
+                <span>{t.labels.renderEngine}</span>
+                <strong>{renderStatus}</strong>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
     </div>
 
     <div class="toolbar-center">
-      <label class="draft-toggle" title={t.labels.autoSaveTitle}>
-        <input
-          type="checkbox"
-          checked={askBeforeLeaveSave}
-          on:change={(event) => void setAskBeforeLeaveSave(event.currentTarget.checked)}
-        />
-        <span>{t.actions.autoSave}</span>
-      </label>
-      <label class="theme-picker">
-        <span>{t.actions.theme}</span>
-        <select value={selectedTheme.id} on:change={(event) => setTheme(event.currentTarget.value)}>
-          {#each themes as theme}
-            <option value={theme.id}>{themeLabel(theme)} · {theme.mode === 'dark' ? t.labels.dark : t.labels.light}</option>
-          {/each}
-        </select>
-      </label>
-
       <div class="segmented" aria-label={t.labels.viewMode}>
-        <button class:active={mode === 'read'} disabled={!selectedPath} on:click={() => setMode('read')}>{t.modes.read}</button>
-        <button class:active={mode === 'edit'} disabled={!selectedPath} on:click={() => setMode('edit')}>{t.modes.edit}</button>
-        <button class:active={mode === 'visual'} disabled={!selectedPath} on:click={() => setMode('visual')}>{t.modes.visual}</button>
-        <button class:active={mode === 'split'} disabled={!selectedPath} on:click={() => setMode('split')}>{t.modes.split}</button>
+        <button class:active={mode === 'read'} disabled={!selectedPath} on:click={() => void setMode('read')}><span class="button-icon" aria-hidden="true">📖</span>{t.modes.read}</button>
+        <button class:active={mode === 'edit'} disabled={!selectedPath} on:click={() => void setMode('edit')}><span class="button-icon" aria-hidden="true">&lt;&gt;</span>{t.modes.edit}</button>
+        <button class:active={mode === 'visual'} disabled={!selectedPath} on:click={() => void setMode('visual')}><span class="button-icon" aria-hidden="true">✏️</span>{t.modes.visual}</button>
+        <button class:active={mode === 'split'} disabled={!selectedPath} on:click={() => void setMode('split')}><span class="button-icon" aria-hidden="true">▣</span>{t.modes.split}</button>
       </div>
+      <div class="toolbar-menu">
+        <button
+          class:active={openToolbarMenu === 'display'}
+          aria-haspopup="menu"
+          aria-expanded={openToolbarMenu === 'display'}
+          on:click|stopPropagation={() => toggleToolbarMenu('display')}
+        >
+          <span class="button-icon" aria-hidden="true">🎨</span>
+          {t.labels.displayMenu}
+        </button>
+        {#if openToolbarMenu === 'display'}
+          <div class="toolbar-menu-popover display-menu" role="menu" tabindex="-1" on:mousedown|stopPropagation>
+            <label class="toolbar-menu-field">
+              <span><span class="menu-icon" aria-hidden="true">🎨</span>{t.actions.theme}</span>
+              <select value={selectedTheme.id} on:change={(event) => setTheme(event.currentTarget.value)}>
+                {#each themes as theme}
+                  <option value={theme.id}>{themeLabel(theme)} · {theme.mode === 'dark' ? t.labels.dark : t.labels.light}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="toolbar-menu-check" title={t.labels.readingFocusTitle}>
+              <input
+                type="checkbox"
+                checked={readingFocusEnabled}
+                on:change={(event) => setReadingFocusEnabled(event.currentTarget.checked)}
+              />
+              <span><span class="menu-icon" aria-hidden="true">🔦</span>{t.labels.readingFocus}</span>
+            </label>
+            {#if backgroundImagePath}
+              <button
+                type="button"
+                class="active"
+                disabled={busy}
+                title={t.labels.clearBackground}
+                on:click={() => {
+                  closeToolbarMenu();
+                  clearBackgroundImage();
+                }}
+              >
+                <span class="button-icon" aria-hidden="true">🧹</span>
+                {t.actions.clearImage}
+              </button>
+            {:else}
+              <button
+                type="button"
+                disabled={busy}
+                title={t.labels.chooseBackground}
+                on:click={() => {
+                  closeToolbarMenu();
+                  void chooseBackgroundImage();
+                }}
+              >
+                <span class="button-icon" aria-hidden="true">🖼️</span>
+                {t.actions.chooseImage}
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+      {#if hasSettingsPanel}
+        <button
+          type="button"
+          class:active={settingsOpen}
+          title={settingsButtonTitle}
+          on:click={() => {
+            closeToolbarMenu();
+            settingsOpen = true;
+          }}
+        >
+          <span class="button-icon" aria-hidden="true">⚙️</span>
+          {settingsButtonLabel}
+        </button>
+      {/if}
     </div>
 
     <div class="toolbar-end">
@@ -753,9 +985,6 @@
         <span class:dot-dirty={dirty} class="dot"></span>
         {#if encoding}
           <span class="muted">{encoding}</span>
-        {/if}
-        {#if renderStatus}
-          <span class="edition-badge">{renderStatus}</span>
         {/if}
         {#if hasSettingsPanel && linkStatus.total > 0}
           <span class:dirty={linkStatus.broken > 0} class="muted">{linkStatus.broken}/{linkStatus.total} 链接</span>
@@ -768,13 +997,8 @@
         {/if}
         <span class="muted">{status}</span>
       </div>
-      {#if backgroundImagePath}
-        <button class="active" disabled={busy} title={t.labels.clearBackground} on:click={clearBackgroundImage}>{t.actions.clearImage}</button>
-      {:else}
-        <button disabled={busy} title={t.labels.chooseBackground} on:click={chooseBackgroundImage}>{t.actions.chooseImage}</button>
-      {/if}
-      <button title={t.labels.immersiveMode} aria-label={t.labels.immersiveMode} on:click={toggleImmersiveMode}>{t.actions.immersive}</button>
-      <button class="language-button" title={t.actions.toggleLanguage} aria-label={t.actions.toggleLanguage} on:click={switchLanguage}>{t.actions.languageButton}</button>
+      <button title={t.labels.immersiveMode} aria-label={t.labels.immersiveMode} on:click={toggleImmersiveMode}><span class="button-icon" aria-hidden="true">⛶</span>{t.actions.immersive}</button>
+      <button class="language-button" title={t.actions.toggleLanguage} aria-label={t.actions.toggleLanguage} on:click={switchLanguage}><span class="button-icon" aria-hidden="true">🌐</span>{t.actions.languageButton}</button>
     </div>
   </header>
 
@@ -827,6 +1051,7 @@
           filePath={selectedPath}
           preferences={previewPreferences}
           fallbackRenderStatus={markdownStatus}
+          {readingFocusEnabled}
           on:openLocalFile={(event) => selectFile(event.detail)}
           on:renderStatus={(event) => setRenderStatus(event.detail)}
           on:renderHtml={(event) => (renderedHtml = event.detail)}
@@ -835,19 +1060,38 @@
           on:readingProgress={(event) => setReadingProgress(event.detail)}
         />
       {:else if mode === 'edit'}
-        <MarkdownEditor bind:this={editorRef} value={content} on:change={(event) => setContent(event.detail)} />
+        {#if MarkdownEditorComponent}
+          <svelte:component this={MarkdownEditorComponent} bind:this={editorRef} value={content} on:change={handleEditorChange} />
+        {:else}
+          <div class="empty-state">
+            <p>{t.status.loadingEditor}</p>
+          </div>
+        {/if}
       {:else if mode === 'visual'}
-        <VisualMarkdownEditor
-          bind:this={visualRef}
-          value={content}
-          {outline}
-          filePath={selectedPath}
-          strings={t.visual}
-          on:change={(event) => setContent(event.detail)}
-        />
+        {#if VisualMarkdownEditorComponent}
+          <svelte:component
+            this={VisualMarkdownEditorComponent}
+            bind:this={visualRef}
+            value={content}
+            {outline}
+            filePath={selectedPath}
+            strings={t.visual}
+            on:change={handleEditorChange}
+          />
+        {:else}
+          <div class="empty-state">
+            <p>{t.status.loadingVisualEditor}</p>
+          </div>
+        {/if}
       {:else}
         <div class="split-view">
-          <MarkdownEditor bind:this={editorRef} value={content} on:change={(event) => setContent(event.detail)} />
+          {#if MarkdownEditorComponent}
+            <svelte:component this={MarkdownEditorComponent} bind:this={editorRef} value={content} on:change={handleEditorChange} />
+          {:else}
+            <div class="empty-state">
+              <p>{t.status.loadingEditor}</p>
+            </div>
+          {/if}
           <MarkdownPreview
             bind:this={previewRef}
             {content}
@@ -855,6 +1099,7 @@
             filePath={selectedPath}
             preferences={previewPreferences}
             fallbackRenderStatus={markdownStatus}
+            {readingFocusEnabled}
             on:openLocalFile={(event) => selectFile(event.detail)}
             on:renderStatus={(event) => setRenderStatus(event.detail)}
             on:renderHtml={(event) => (renderedHtml = event.detail)}

@@ -13,8 +13,8 @@
   savePreviewPreferences={savePlusPreferences}
   previewReaderStyle={plusReaderStyle}
   markdownStatus={plusMarkdownStatus}
-  settingsButtonLabel="Plus"
-  settingsButtonTitle="Plus 阅读设置"
+  settingsButtonLabel="高级设置"
+  settingsButtonTitle="高级设置"
   settingsUpdatedStatus="Plus 设置已更新"
   settingsPanelComponent={PlusSettingsPanel}
   refreshWorkspaceHeadings={indexWorkspaceHeadings}
