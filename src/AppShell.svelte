@@ -1,9 +1,29 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { confirm, message, open, save } from '@tauri-apps/plugin-dialog';
-  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { convertFileSrc, isTauri } from '@tauri-apps/api/core';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import {
+    BookOpen,
+    ChevronDown,
+    Code2,
+    Columns2,
+    Ellipsis,
+    FileText,
+    Folder,
+    FolderOpen,
+    Image as ImageIcon,
+    Languages,
+    Maximize2,
+    Palette,
+    Pencil,
+    RefreshCw,
+    Save,
+    Settings,
+    Star,
+    Trash2
+  } from 'lucide-svelte';
   import FileTree from './components/FileTree.svelte';
   import MarkdownPreview from './components/MarkdownPreview.svelte';
   import OutlinePanel from './components/OutlinePanel.svelte';
@@ -65,7 +85,7 @@
   let defaultSettingsBusy = false;
   let dirty = false;
   let dropActive = false;
-  let openToolbarMenu: 'open' | 'file' | 'display' | null = null;
+  let openToolbarMenu: 'open' | 'appearance' | 'more' | null = null;
   let selectedTheme: AppTheme = themes[0];
   let backgroundImagePath = '';
   let backgroundImageUrl = '';
@@ -457,7 +477,7 @@
     await visualEditorLoadPromise;
   }
 
-  function toggleToolbarMenu(menu: 'open' | 'file' | 'display') {
+  function toggleToolbarMenu(menu: 'open' | 'appearance' | 'more') {
     openToolbarMenu = openToolbarMenu === menu ? null : menu;
   }
 
@@ -752,6 +772,7 @@
     let unlistenDragDrop: (() => void) | undefined;
     let unlistenClose: (() => void) | undefined;
     restoreAppearanceSettings();
+    if (!isTauri()) return;
 
     void getCurrentWindow()
       .onCloseRequested((event) => {
@@ -806,45 +827,39 @@
           aria-expanded={openToolbarMenu === 'open'}
           on:click|stopPropagation={() => toggleToolbarMenu('open')}
         >
-          <span class="button-icon" aria-hidden="true">📂</span>
+          <FolderOpen class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
           {t.actions.open}
+          <ChevronDown class="command-chevron" size={13} strokeWidth={1.8} aria-hidden="true" />
         </button>
         {#if openToolbarMenu === 'open'}
-          <div class="toolbar-menu-popover" role="menu" tabindex="-1" on:mousedown|stopPropagation>
+          <div class="toolbar-menu-popover" role="menu" tabindex="-1" aria-label={t.actions.open}>
             <button
               type="button"
+              role="menuitem"
               disabled={busy}
               on:click={() => {
                 closeToolbarMenu();
                 void chooseFile();
               }}
             >
-              <span class="button-icon" aria-hidden="true">📄</span>
+              <FileText class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
               {t.actions.openFile}
             </button>
             <button
               type="button"
+              role="menuitem"
               disabled={busy}
               on:click={() => {
                 closeToolbarMenu();
                 void chooseWorkspace();
               }}
             >
-              <span class="button-icon" aria-hidden="true">📁</span>
+              <Folder class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
               {t.actions.openFolder}
             </button>
           </div>
         {/if}
       </div>
-      <button
-        class="toolbar-icon-button"
-        disabled={!workspacePath || busy}
-        title={t.actions.refresh}
-        aria-label={t.actions.refresh}
-        on:click={refreshWorkspace}
-      >
-        <span class="button-icon" aria-hidden="true">🔄</span>
-      </button>
       <button
         class="toolbar-icon-button"
         class:dirty
@@ -853,72 +868,58 @@
         aria-label={t.actions.save}
         on:click={() => void saveCurrent()}
       >
-        <span class="button-icon" aria-hidden="true">💾</span>
+        <Save class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
       </button>
-      <div class="toolbar-menu">
-        <button
-          class:active={openToolbarMenu === 'file'}
-          aria-haspopup="menu"
-          aria-expanded={openToolbarMenu === 'file'}
-          on:click|stopPropagation={() => toggleToolbarMenu('file')}
-        >
-          <span class="button-icon" aria-hidden="true">📁</span>
-          {t.labels.fileMenu}
-        </button>
-        {#if openToolbarMenu === 'file'}
-          <div class="toolbar-menu-popover" role="menu" tabindex="-1" on:mousedown|stopPropagation>
-            <button
-              type="button"
-              disabled={busy || defaultSettingsBusy}
-              title={t.labels.defaultAppTitle}
-              on:click={() => {
-                closeToolbarMenu();
-                void openDefaultSettings();
-              }}
-            >
-              <span class="button-icon" aria-hidden="true">⭐</span>
-              {defaultSettingsBusy ? t.actions.setting : t.actions.setDefault}
-            </button>
-            <label class="toolbar-menu-check" title={t.labels.autoSaveTitle}>
-              <input
-                type="checkbox"
-                checked={askBeforeLeaveSave}
-                on:change={(event) => void setAskBeforeLeaveSave(event.currentTarget.checked)}
-              />
-              <span><span class="menu-icon" aria-hidden="true">💾</span>{t.actions.autoSave}</span>
-            </label>
-            {#if renderStatus}
-              <div class="toolbar-menu-info">
-                <span>{t.labels.renderEngine}</span>
-                <strong>{renderStatus}</strong>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <button
+        class="toolbar-icon-button"
+        disabled={!workspacePath || busy}
+        title={t.actions.refresh}
+        aria-label={t.actions.refresh}
+        on:click={refreshWorkspace}
+      >
+        <RefreshCw class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+      </button>
     </div>
 
     <div class="toolbar-center">
       <div class="segmented" aria-label={t.labels.viewMode}>
-        <button class:active={mode === 'read'} disabled={!selectedPath} on:click={() => void setMode('read')}><span class="button-icon" aria-hidden="true">📖</span>{t.modes.read}</button>
-        <button class:active={mode === 'edit'} disabled={!selectedPath} on:click={() => void setMode('edit')}><span class="button-icon" aria-hidden="true">&lt;&gt;</span>{t.modes.edit}</button>
-        <button class:active={mode === 'visual'} disabled={!selectedPath} on:click={() => void setMode('visual')}><span class="button-icon" aria-hidden="true">✏️</span>{t.modes.visual}</button>
-        <button class:active={mode === 'split'} disabled={!selectedPath} on:click={() => void setMode('split')}><span class="button-icon" aria-hidden="true">▣</span>{t.modes.split}</button>
+        <button class:active={mode === 'read'} disabled={!selectedPath} on:click={() => void setMode('read')}>
+          <BookOpen class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+          {t.modes.read}
+        </button>
+        <button class:active={mode === 'edit'} disabled={!selectedPath} on:click={() => void setMode('edit')}>
+          <Code2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+          {t.modes.edit}
+        </button>
+        <button class:active={mode === 'visual'} disabled={!selectedPath} on:click={() => void setMode('visual')}>
+          <Pencil class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+          {t.modes.visual}
+        </button>
+        <button class:active={mode === 'split'} disabled={!selectedPath} on:click={() => void setMode('split')}>
+          <Columns2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+          {t.modes.split}
+        </button>
       </div>
+    </div>
+
+    <div class="toolbar-end">
       <div class="toolbar-menu">
         <button
-          class:active={openToolbarMenu === 'display'}
-          aria-haspopup="menu"
-          aria-expanded={openToolbarMenu === 'display'}
-          on:click|stopPropagation={() => toggleToolbarMenu('display')}
+          type="button"
+          class="toolbar-icon-button"
+          class:active={openToolbarMenu === 'appearance'}
+          title={t.labels.displayMenu}
+          aria-label={t.labels.displayMenu}
+          aria-haspopup="dialog"
+          aria-expanded={openToolbarMenu === 'appearance'}
+          on:click|stopPropagation={() => toggleToolbarMenu('appearance')}
         >
-          <span class="button-icon" aria-hidden="true">🎨</span>
-          {t.labels.displayMenu}
+          <Palette class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
         </button>
-        {#if openToolbarMenu === 'display'}
-          <div class="toolbar-menu-popover display-menu" role="menu" tabindex="-1" on:mousedown|stopPropagation>
+        {#if openToolbarMenu === 'appearance'}
+          <div class="toolbar-menu-popover appearance-menu" role="dialog" aria-label={t.labels.displayMenu}>
             <label class="toolbar-menu-field">
-              <span><span class="menu-icon" aria-hidden="true">🎨</span>{t.actions.theme}</span>
+              <span>{t.actions.theme}</span>
               <select value={selectedTheme.id} on:change={(event) => setTheme(event.currentTarget.value)}>
                 {#each themes as theme}
                   <option value={theme.id}>{themeLabel(theme)} · {theme.mode === 'dark' ? t.labels.dark : t.labels.light}</option>
@@ -931,7 +932,7 @@
                 checked={readingFocusEnabled}
                 on:change={(event) => setReadingFocusEnabled(event.currentTarget.checked)}
               />
-              <span><span class="menu-icon" aria-hidden="true">🔦</span>{t.labels.readingFocus}</span>
+              <span>{t.labels.readingFocus}</span>
             </label>
             {#if backgroundImagePath}
               <button
@@ -944,7 +945,7 @@
                   clearBackgroundImage();
                 }}
               >
-                <span class="button-icon" aria-hidden="true">🧹</span>
+                <Trash2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
                 {t.actions.clearImage}
               </button>
             {:else}
@@ -957,7 +958,7 @@
                   void chooseBackgroundImage();
                 }}
               >
-                <span class="button-icon" aria-hidden="true">🖼️</span>
+                <ImageIcon class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
                 {t.actions.chooseImage}
               </button>
             {/if}
@@ -967,38 +968,84 @@
       {#if hasSettingsPanel}
         <button
           type="button"
+          class="toolbar-icon-button"
           class:active={settingsOpen}
           title={settingsButtonTitle}
+          aria-label={settingsButtonLabel}
           on:click={() => {
             closeToolbarMenu();
             settingsOpen = true;
           }}
         >
-          <span class="button-icon" aria-hidden="true">⚙️</span>
-          {settingsButtonLabel}
+          <Settings class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
         </button>
       {/if}
-    </div>
-
-    <div class="toolbar-end">
-      <div class="status-line" title={selectedPath}>
-        <span class:dot-dirty={dirty} class="dot"></span>
-        {#if encoding}
-          <span class="muted">{encoding}</span>
+      <div class="toolbar-menu">
+        <button
+          type="button"
+          class="toolbar-icon-button"
+          class:active={openToolbarMenu === 'more'}
+          title={t.labels.moreMenu}
+          aria-label={t.labels.moreMenu}
+          aria-haspopup="dialog"
+          aria-expanded={openToolbarMenu === 'more'}
+          on:click|stopPropagation={() => toggleToolbarMenu('more')}
+        >
+          <Ellipsis class="button-icon" size={16} strokeWidth={1.8} aria-hidden="true" />
+        </button>
+        {#if openToolbarMenu === 'more'}
+          <div class="toolbar-menu-popover more-menu" role="dialog" aria-label={t.labels.moreMenu}>
+            <button
+              type="button"
+              disabled={busy || defaultSettingsBusy}
+              title={t.labels.defaultAppTitle}
+              on:click={() => {
+                closeToolbarMenu();
+                void openDefaultSettings();
+              }}
+            >
+              <Star class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+              {defaultSettingsBusy ? t.actions.setting : t.actions.setDefault}
+            </button>
+            <label class="toolbar-menu-check" title={t.labels.autoSaveTitle}>
+              <input
+                type="checkbox"
+                checked={askBeforeLeaveSave}
+                on:change={(event) => void setAskBeforeLeaveSave(event.currentTarget.checked)}
+              />
+              <span>{t.actions.autoSave}</span>
+            </label>
+            <button
+              type="button"
+              title={t.labels.immersiveMode}
+              on:click={() => {
+                closeToolbarMenu();
+                void toggleImmersiveMode();
+              }}
+            >
+              <Maximize2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+              {t.actions.immersive}
+            </button>
+            <button
+              type="button"
+              title={t.actions.toggleLanguage}
+              on:click={() => {
+                closeToolbarMenu();
+                switchLanguage();
+              }}
+            >
+              <Languages class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
+              {t.actions.languageButton}
+            </button>
+            {#if renderStatus}
+              <div class="toolbar-menu-info">
+                <span>{t.labels.renderEngine}</span>
+                <strong>{renderStatus}</strong>
+              </div>
+            {/if}
+          </div>
         {/if}
-        {#if hasSettingsPanel && linkStatus.total > 0}
-          <span class:dirty={linkStatus.broken > 0} class="muted">{linkStatus.broken}/{linkStatus.total} 链接</span>
-        {/if}
-        {#if hasWorkspaceHeadingIndex && headingIndexBusy}
-          <span class="muted">索引中</span>
-        {/if}
-        {#if selectedPath && (mode === 'read' || mode === 'split')}
-          <span class="muted">{readingProgressLabel}</span>
-        {/if}
-        <span class="muted">{status}</span>
       </div>
-      <button title={t.labels.immersiveMode} aria-label={t.labels.immersiveMode} on:click={toggleImmersiveMode}><span class="button-icon" aria-hidden="true">⛶</span>{t.actions.immersive}</button>
-      <button class="language-button" title={t.actions.toggleLanguage} aria-label={t.actions.toggleLanguage} on:click={switchLanguage}><span class="button-icon" aria-hidden="true">🌐</span>{t.actions.languageButton}</button>
     </div>
   </header>
 
@@ -1159,6 +1206,25 @@
       {/if}
     </aside>
   </section>
+
+  <footer class="status-bar" aria-label={t.labels.statusBar} title={selectedPath}>
+    <div class="status-bar-context">
+      <span class:dot-dirty={dirty} class="dot"></span>
+      {#if encoding}
+        <span>{encoding}</span>
+      {/if}
+      {#if hasSettingsPanel && linkStatus.total > 0}
+        <span class:dirty={linkStatus.broken > 0}>{linkStatus.broken}/{linkStatus.total} 链接</span>
+      {/if}
+      {#if hasWorkspaceHeadingIndex && headingIndexBusy}
+        <span>索引中</span>
+      {/if}
+      {#if selectedPath && (mode === 'read' || mode === 'split')}
+        <span>{readingProgressLabel}</span>
+      {/if}
+    </div>
+    <span class="status-bar-message">{status}</span>
+  </footer>
 
   {#if immersiveMode}
     <button class="immersive-exit" on:click={() => setImmersiveMode(false)}>{t.actions.exitImmersive}</button>

@@ -64,6 +64,15 @@ expectIncludes(plusApp, 'PlusSettingsPanel', 'Plus app settings panel');
 expectIncludes(plusApp, 'defaultPlusPreferences', 'Plus app preferences');
 expectIncludes(plusApp, 'indexWorkspaceHeadings', 'Plus app workspace heading index');
 
+const appShell = readText('src/AppShell.svelte');
+expectIncludes(appShell, 'class="status-bar"', 'shared bottom status bar');
+expectIncludes(appShell, "openToolbarMenu === 'more'", 'shared More menu');
+expectIncludes(appShell, 'if (!isTauri()) return;', 'browser-safe app shell mount');
+expectExcludes(appShell, '📂', 'shared toolbar emoji icons');
+
+const appCss = readText('src/app.css');
+expectIncludes(appCss, 'grid-template-rows: 48px minmax(0, 1fr) 24px;', 'shell command and status rows');
+
 const webPlusApp = readText('src/WebPlusApp.svelte');
 expectIncludes(webPlusApp, 'MarkdownEditor', 'Web Plus editor');
 expectIncludes(webPlusApp, 'MarkdownPreview', 'Web Plus preview');

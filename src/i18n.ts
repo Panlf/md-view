@@ -104,6 +104,8 @@ export type AppText = {
     immersiveMode: string;
     fileMenu: string;
     displayMenu: string;
+    moreMenu: string;
+    statusBar: string;
     renderEngine: string;
     readingFocus: string;
     readingFocusTitle: string;
@@ -247,7 +249,9 @@ export const text: Record<Language, AppText> = {
       chooseBackground: '选择背景图',
       immersiveMode: 'F11 沉浸模式',
       fileMenu: '文件',
-      displayMenu: '样式',
+      displayMenu: '阅读外观',
+      moreMenu: '更多',
+      statusBar: '文档状态',
       renderEngine: '渲染引擎',
       readingFocus: '渲染聚焦',
       readingFocusTitle: '开启后阅读区只突出当前段落，其余内容变灰',
@@ -394,7 +398,9 @@ export const text: Record<Language, AppText> = {
       chooseBackground: 'Choose background image',
       immersiveMode: 'F11 focus mode',
       fileMenu: 'File',
-      displayMenu: 'Style',
+      displayMenu: 'Appearance',
+      moreMenu: 'More',
+      statusBar: 'Document status',
       renderEngine: 'Renderer',
       readingFocus: 'Render focus',
       readingFocusTitle: 'Dim non-current reader blocks and highlight the current paragraph',
