@@ -25,13 +25,13 @@
   let scrollFrame = 0;
   let resizeObserver: ResizeObserver | undefined;
   let currentReadingBlock: HTMLElement | null = null;
+  let contextReadingBlocks: HTMLElement[] = [];
   let lastActiveLine = 0;
   let lastReadingProgress = -1;
   let imageOverlay: { src: string; source: string; scale: number } | null = null;
   let deferredRenderTimer = 0;
   $: if (!readingFocusEnabled) {
-    currentReadingBlock?.classList.remove('current-reading-block');
-    currentReadingBlock = null;
+    clearReadingFocusClasses();
   } else {
     scheduleReadingPositionUpdate();
   }
@@ -190,10 +190,33 @@
   }
 
   function resetReadingPosition() {
-    currentReadingBlock?.classList.remove('current-reading-block');
-    currentReadingBlock = null;
+    clearReadingFocusClasses();
     lastActiveLine = -1;
     lastReadingProgress = -1;
+  }
+
+  function clearReadingFocusClasses() {
+    currentReadingBlock?.classList.remove('current-reading-block');
+    for (const block of contextReadingBlocks) {
+      block.classList.remove('reading-context-block');
+    }
+    currentReadingBlock = null;
+    contextReadingBlocks = [];
+  }
+
+  function updateReadingFocusClasses(nextBlock: HTMLElement | null, blocks: HTMLElement[]) {
+    clearReadingFocusClasses();
+    if (!nextBlock) return;
+
+    currentReadingBlock = nextBlock;
+    currentReadingBlock.classList.add('current-reading-block');
+    const activeIndex = blocks.indexOf(nextBlock);
+    contextReadingBlocks = [blocks[activeIndex - 1], blocks[activeIndex + 1]].filter(
+      (block): block is HTMLElement => Boolean(block)
+    );
+    for (const block of contextReadingBlocks) {
+      block.classList.add('reading-context-block');
+    }
   }
 
   function updateReadingPosition() {
@@ -204,14 +227,12 @@
       dispatch('readingProgress', progress);
     }
 
-    const nextBlock = findCurrentReadingBlock();
+    const blocks = getReadingBlocks();
+    const nextBlock = findCurrentReadingBlock(blocks);
     if (!readingFocusEnabled) {
-      currentReadingBlock?.classList.remove('current-reading-block');
-      currentReadingBlock = null;
+      clearReadingFocusClasses();
     } else if (nextBlock !== currentReadingBlock) {
-      currentReadingBlock?.classList.remove('current-reading-block');
-      nextBlock?.classList.add('current-reading-block');
-      currentReadingBlock = nextBlock;
+      updateReadingFocusClasses(nextBlock, blocks);
     }
 
     const activeLine = findActiveHeadingLine(nextBlock);
@@ -227,9 +248,12 @@
     return Math.max(0, Math.min(100, Math.round((previewHost.scrollTop / maxScroll) * 100)));
   }
 
-  function findCurrentReadingBlock() {
-    const blocks = getReadingBlocks();
+  function findCurrentReadingBlock(blocks: HTMLElement[]) {
     if (blocks.length === 0) return null;
+    const maxScroll = previewHost.scrollHeight - previewHost.clientHeight;
+    if (maxScroll > 0 && previewHost.scrollTop >= maxScroll - 2) {
+      return blocks[blocks.length - 1] ?? null;
+    }
     const hostRect = previewHost.getBoundingClientRect();
     const focusY = hostRect.top + hostRect.height * 0.25;
     let candidate: HTMLElement | null = null;

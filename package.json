@@ -1,6 +1,6 @@
 {
   "name": "md-view",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local Markdown reader and editor built with Tauri and Svelte.",
   "license": "WTFPL",
   "type": "module",
@@ -37,6 +37,7 @@
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "codemirror": "^6.0.2",
     "dompurify": "^3.2.4",
+    "lucide-svelte": "^1.0.0",
     "marked": "^15.0.7",
     "mermaid": "^11.16.0",
     "rehype-highlight": "^7.0.2",

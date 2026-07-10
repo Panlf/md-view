@@ -406,6 +406,7 @@ function configureMermaid(mermaid: MermaidModule) {
   mermaid.default.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    suppressErrorRendering: true,
     theme: document.documentElement.dataset.themeMode === 'dark' ? 'dark' : 'default'
   });
 }
