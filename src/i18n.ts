@@ -253,8 +253,8 @@ export const text: Record<Language, AppText> = {
       moreMenu: '更多',
       statusBar: '文档状态',
       renderEngine: '渲染引擎',
-      readingFocus: '渲染聚焦',
-      readingFocusTitle: '开启后阅读区只突出当前段落，其余内容变灰',
+      readingFocus: '阅读高亮',
+      readingFocusTitle: '柔和标记当前段落，并保留前后段落作为上下文',
       dark: '深色',
       light: '亮色'
     },
@@ -262,6 +262,9 @@ export const text: Record<Language, AppText> = {
       'tea-light': '清茶 Light',
       'ink-light': '墨蓝 Light',
       'paper-light': '暖纸 Light',
+      'rice-paper-light': '稻纸 Light',
+      'mist-pine-light': '雾松 Light',
+      'lotus-gray-light': '藕灰 Light',
       'night-dark': '夜航 Dark',
       'wisteria-dark': '紫藤 Dark',
       'amber-dark': '琥珀 Dark'
@@ -402,8 +405,8 @@ export const text: Record<Language, AppText> = {
       moreMenu: 'More',
       statusBar: 'Document status',
       renderEngine: 'Renderer',
-      readingFocus: 'Render focus',
-      readingFocusTitle: 'Dim non-current reader blocks and highlight the current paragraph',
+      readingFocus: 'Reading highlight',
+      readingFocusTitle: 'Softly highlight the current paragraph and preserve adjacent context',
       dark: 'Dark',
       light: 'Light'
     },
@@ -411,6 +414,9 @@ export const text: Record<Language, AppText> = {
       'tea-light': 'Tea Light',
       'ink-light': 'Ink Light',
       'paper-light': 'Warm Paper',
+      'rice-paper-light': 'Rice Paper Light',
+      'mist-pine-light': 'Mist Pine Light',
+      'lotus-gray-light': 'Lotus Gray Light',
       'night-dark': 'Night Dark',
       'wisteria-dark': 'Wisteria Dark',
       'amber-dark': 'Amber Dark'

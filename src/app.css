@@ -899,21 +899,20 @@ button:disabled {
 .markdown-preview.reading-focus-enabled > .markdown-mermaid,
 .markdown-preview.reading-focus-enabled > .markdown-properties,
 .markdown-preview.reading-focus-enabled > .markdown-frontmatter {
-  opacity: 0.42;
-  filter: grayscale(0.45);
   transition:
-    opacity 120ms ease,
-    filter 120ms ease,
+    background-color 140ms ease,
     box-shadow 120ms ease;
 }
 
+.markdown-preview.reading-focus-enabled > .reading-context-block {
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--selected-bg) 24%, transparent);
+}
+
 .markdown-preview.reading-focus-enabled > .current-reading-block {
-  opacity: 1;
-  filter: none;
-  border-radius: 7px;
-  box-shadow:
-    -6px 0 0 -2px color-mix(in srgb, var(--primary) 72%, transparent),
-    0 0 0 6px color-mix(in srgb, var(--selected-bg) 24%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--selected-bg) 62%, transparent);
+  box-shadow: -5px 0 0 -2px color-mix(in srgb, var(--primary) 78%, transparent);
 }
 
 .markdown-preview ul,

@@ -211,7 +211,7 @@ flowchart LR
           checked={readingFocusEnabled}
           on:change={(event) => updateReadingFocusEnabled(event.currentTarget.checked)}
         />
-        <span>聚焦</span>
+        <span>高亮</span>
       </label>
       <select value={selectedTheme.name} on:change={(event) => updateTheme(event.currentTarget.value)} aria-label="主题">
         {#each themes as theme}
