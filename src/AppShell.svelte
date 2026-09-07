@@ -107,6 +107,7 @@
   let previewRef: MarkdownPreview;
   let visualRef: any;
 
+  const LAST_WORKSPACE_STORAGE_KEY = 'md-view-last-workspace-path';
   const LEFT_SIDEBAR_COLLAPSED_KEY = 'md-view-left-sidebar-collapsed';
   const RIGHT_SIDEBAR_COLLAPSED_KEY = 'md-view-right-sidebar-collapsed';
   const AUTO_SAVE_ENABLED_KEY = 'md-view-auto-save-enabled';
@@ -180,9 +181,29 @@
     }
   }
 
+  async function restoreLastWorkspace() {
+    const savedPath = localStorage.getItem(LAST_WORKSPACE_STORAGE_KEY);
+    if (!savedPath) return;
+    busy = true;
+    status = t.status.opening;
+    try {
+      const result = await openPath(savedPath);
+      if (!result.tree || !result.workspace_path) return;
+      applyWorkspace(result.tree, result.workspace_path, result.kind === 'workspace');
+      status = t.status.folderOpened;
+    } catch {
+      // The folder may have been moved or deleted; drop the stale record without interrupting startup.
+      localStorage.removeItem(LAST_WORKSPACE_STORAGE_KEY);
+      status = t.status.ready;
+    } finally {
+      busy = false;
+    }
+  }
+
   function applyWorkspace(nextTree: FileNode, nextPath: string, resetFile: boolean) {
     tree = nextTree;
     workspacePath = nextPath;
+    localStorage.setItem(LAST_WORKSPACE_STORAGE_KEY, nextPath);
     if (refreshWorkspaceHeadings) {
       window.setTimeout(() => {
         void refreshHeadingIndex(nextPath);
@@ -803,7 +824,9 @@
       const path = paths[0];
       if (path) {
         void loadPath(path);
+        return;
       }
+      void restoreLastWorkspace();
     });
 
     return () => {
