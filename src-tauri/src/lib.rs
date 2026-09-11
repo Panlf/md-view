@@ -102,18 +102,37 @@ struct DraftSummary {
 
 type AppResult<T> = Result<T, String>;
 
-#[tauri::command]
-fn open_workspace(app: AppHandle, path: String) -> AppResult<FileNode> {
-    let root = PathBuf::from(path);
-    if !root.is_dir() {
-        return Err("请选择有效目录".into());
-    }
-    allow_asset_directory(&app, &root)?;
-    scan_directory(&root)
+/// 同步命令默认在 Tauri 主线程执行，目录扫描等重 I/O 会卡住界面。
+/// 统一用这个包装把阻塞工作丢到后台线程池。
+async fn run_blocking<T, F>(task: F) -> AppResult<T>
+where
+    F: FnOnce() -> AppResult<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("后台任务执行失败: {error}"))?
 }
 
 #[tauri::command]
-fn open_path(app: AppHandle, path: String) -> AppResult<OpenPathResult> {
+async fn open_workspace(app: AppHandle, path: String) -> AppResult<FileNode> {
+    run_blocking(move || {
+        let root = PathBuf::from(&path);
+        if !root.is_dir() {
+            return Err("请选择有效目录".into());
+        }
+        allow_asset_directory(&app, &root)?;
+        scan_directory(&root)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn open_path(app: AppHandle, path: String) -> AppResult<OpenPathResult> {
+    run_blocking(move || open_path_sync(&app, path)).await
+}
+
+fn open_path_sync(app: &AppHandle, path: String) -> AppResult<OpenPathResult> {
     let source_path = PathBuf::from(path);
 
     if source_path.is_dir() {
@@ -180,15 +199,18 @@ fn workspace_stub_tree(workspace_path: &Path, file_path: &Path) -> AppResult<Fil
 }
 
 #[tauri::command]
-fn read_file(path: String) -> AppResult<ReadFileResult> {
-    let file_path = PathBuf::from(&path);
-    if !file_path.is_file() {
-        return Err("文件不存在".into());
-    }
-    if !is_supported_text_path(&file_path) {
-        return Err("Only supported text files can be opened.".into());
-    }
-    read_file_path(&file_path)
+async fn read_file(path: String) -> AppResult<ReadFileResult> {
+    run_blocking(move || {
+        let file_path = PathBuf::from(&path);
+        if !file_path.is_file() {
+            return Err("文件不存在".into());
+        }
+        if !is_supported_text_path(&file_path) {
+            return Err("Only supported text files can be opened.".into());
+        }
+        read_file_path(&file_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -353,36 +375,39 @@ fn read_file_path(file_path: &Path) -> AppResult<ReadFileResult> {
 }
 
 #[tauri::command]
-fn save_file(path: String, content: String, expected: Option<u64>, overwrite: bool) -> AppResult<SaveResult> {
-    let file_path = PathBuf::from(&path);
-    if !file_path.is_file() {
-        return Err("文件不存在，无法保存".into());
-    }
-
-    if !is_supported_text_path(&file_path) {
-        return Err("Only supported text files can be saved.".into());
-    }
-
-    let current_modified = modified_at(&file_path)?;
-    if let Some(expected_modified) = expected {
-        if current_modified != expected_modified && !overwrite {
-            return Ok(SaveResult {
-                ok: false,
-                conflict: true,
-                modified_at: Some(current_modified),
-                message: Some("磁盘文件已被外部修改。".into()),
-            });
+async fn save_file(path: String, content: String, expected: Option<u64>, overwrite: bool) -> AppResult<SaveResult> {
+    run_blocking(move || {
+        let file_path = PathBuf::from(&path);
+        if !file_path.is_file() {
+            return Err("文件不存在，无法保存".into());
         }
-    }
 
-    fs::write(&file_path, content.as_bytes()).map_err(to_error)?;
-    let modified_at = modified_at(&file_path)?;
-    Ok(SaveResult {
-        ok: true,
-        conflict: false,
-        modified_at: Some(modified_at),
-        message: None,
+        if !is_supported_text_path(&file_path) {
+            return Err("Only supported text files can be saved.".into());
+        }
+
+        let current_modified = modified_at(&file_path)?;
+        if let Some(expected_modified) = expected {
+            if current_modified != expected_modified && !overwrite {
+                return Ok(SaveResult {
+                    ok: false,
+                    conflict: true,
+                    modified_at: Some(current_modified),
+                    message: Some("磁盘文件已被外部修改。".into()),
+                });
+            }
+        }
+
+        fs::write(&file_path, content.as_bytes()).map_err(to_error)?;
+        let modified_at = modified_at(&file_path)?;
+        Ok(SaveResult {
+            ok: true,
+            conflict: false,
+            modified_at: Some(modified_at),
+            message: None,
+        })
     })
+    .await
 }
 
 #[tauri::command]
@@ -391,53 +416,65 @@ fn extract_outline(content: String) -> Vec<Heading> {
 }
 
 #[tauri::command]
-fn validate_local_links(markdown_path: String, links: Vec<LinkValidationRequest>) -> AppResult<Vec<LinkValidationResult>> {
-    let base_file = PathBuf::from(&markdown_path);
-    let base_dir = base_file.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-    let current_content = if base_file.is_file() {
-        read_file_path(&base_file).ok().map(|file| file.content)
-    } else {
-        None
-    };
-    let current_anchors = current_content
-        .as_ref()
-        .map(|content| heading_anchor_set(&extract_headings_from_content(content)))
-        .unwrap_or_default();
+async fn validate_local_links(
+    markdown_path: String,
+    links: Vec<LinkValidationRequest>,
+) -> AppResult<Vec<LinkValidationResult>> {
+    run_blocking(move || {
+        let base_file = PathBuf::from(&markdown_path);
+        let base_dir = base_file.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+        let current_content = if base_file.is_file() {
+            read_file_path(&base_file).ok().map(|file| file.content)
+        } else {
+            None
+        };
+        let current_anchors = current_content
+            .as_ref()
+            .map(|content| heading_anchor_set(&extract_headings_from_content(content)))
+            .unwrap_or_default();
 
-    Ok(links
-        .into_iter()
-        .map(|link| validate_one_link(&base_dir, &current_anchors, link))
-        .collect())
+        Ok(links
+            .into_iter()
+            .map(|link| validate_one_link(&base_dir, &current_anchors, link))
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
-fn index_workspace_headings(workspace: String) -> AppResult<Vec<WorkspaceHeading>> {
-    let root = PathBuf::from(workspace);
-    if !root.is_dir() {
-        return Err("Workspace path is not a directory.".into());
-    }
-
-    let mut headings = Vec::new();
-    collect_workspace_headings(&root, &mut headings)?;
-    headings.sort_by(|left, right| {
-        left.path
-            .to_lowercase()
-            .cmp(&right.path.to_lowercase())
-            .then_with(|| left.line.cmp(&right.line))
-    });
-    Ok(headings)
-}
-
-#[tauri::command]
-fn export_html(path: String, html: String) -> AppResult<()> {
-    let output = PathBuf::from(path);
-    if let Some(parent) = output.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).map_err(to_error)?;
+async fn index_workspace_headings(workspace: String) -> AppResult<Vec<WorkspaceHeading>> {
+    run_blocking(move || {
+        let root = PathBuf::from(workspace);
+        if !root.is_dir() {
+            return Err("Workspace path is not a directory.".into());
         }
-    }
-    let mut file = fs::File::create(output).map_err(to_error)?;
-    file.write_all(html.as_bytes()).map_err(to_error)
+
+        let mut headings = Vec::new();
+        collect_workspace_headings(&root, &mut headings)?;
+        headings.sort_by(|left, right| {
+            left.path
+                .to_lowercase()
+                .cmp(&right.path.to_lowercase())
+                .then_with(|| left.line.cmp(&right.line))
+        });
+        Ok(headings)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn export_html(path: String, html: String) -> AppResult<()> {
+    run_blocking(move || {
+        let output = PathBuf::from(path);
+        if let Some(parent) = output.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+        }
+        let mut file = fs::File::create(output).map_err(to_error)?;
+        file.write_all(html.as_bytes()).map_err(to_error)
+    })
+    .await
 }
 
 fn extract_headings_from_content(content: &str) -> Vec<Heading> {
@@ -772,6 +809,17 @@ fn clear_workspace_drafts(app: AppHandle, workspace: String) -> AppResult<usize>
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // 窗口配置为 hidden，由前端在首帧后显示；
+            // 这里兜底：万一前端初始化失败，4 秒后强制显示，避免出现"隐形"应用。
+            if let Some(window) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    let _ = window.show();
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_workspace,
             open_path,

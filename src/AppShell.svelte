@@ -82,6 +82,7 @@
   let headingSearch = '';
   let headingIndexBusy = false;
   let busy = false;
+  let selectToken = 0;
   let defaultSettingsBusy = false;
   let dirty = false;
   let dropActive = false;
@@ -287,16 +288,17 @@
   async function selectFile(path: string) {
     if (path === selectedPath) return;
     if (!(await ensureSafeToLeave())) return;
-    busy = true;
+    // 快速读文件不禁用工具栏（避免按钮闪烁）；用序列号保证乱序响应不会覆盖新选择。
+    const token = ++selectToken;
     status = t.status.readingFile;
     try {
       const result = await readFile(path);
+      if (token !== selectToken) return;
       await openReadResult(result);
     } catch (error) {
+      if (token !== selectToken) return;
       status = t.status.readFailed;
       await message(String(error), { title: t.dialogs.readFailed, kind: 'error' });
-    } finally {
-      busy = false;
     }
   }
 
@@ -794,6 +796,13 @@
     let unlistenClose: (() => void) | undefined;
     restoreAppearanceSettings();
     if (!isTauri()) return;
+
+    // 窗口配置为初始隐藏：等主题应用、首帧绘制完成后再显示，消除启动白屏。
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void getCurrentWindow().show();
+      });
+    });
 
     void getCurrentWindow()
       .onCloseRequested((event) => {
