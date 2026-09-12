@@ -4,9 +4,25 @@
 
 md-view 是一个本地 Markdown 阅读和编辑器，使用 Tauri 2 + Svelte + Vite 构建。它面向需要轻量、本地、可继续自行修改的 Markdown 工具用户。
 
+[产品介绍](https://t-meow.github.io/md-view/) · [在线体验](https://t-meow.github.io/md-view/play/) · [公开下载](https://github.com/T-meow/md-view/releases/latest)
+
+## 当前开发版
+
+本分支包含尚未发布的桌面重构；公开下载的功能与平台以 Release 为准。
+
+- 单独打开文件只读取目标文档。显式打开文件夹后按层加载，展开时读取子项；大型列表只渲染可见行。
+- 多标签保留内容、源码撤销历史、视图和阅读位置。`Ctrl+P` 优先查找已打开、最近及已加载文件，工作区索引由按钮按需启动。
+- 新建文件/文件夹、另存为、重命名、移动、移入回收站、复制路径及系统定位；基础文件管理由 Lite/Plus 共用。
+- 手动保存与自动草稿；自动写回默认关闭。保存使用版本快照、冲突检查和原子替换，保留 UTF-8/GBK/UTF-16、BOM 与换行风格。
+- 默认不遍历链接和 junction，遵循 `.gitignore`、`.ignore` 与自定义排除。扫描限额十万项/30 秒；大于 2 MiB 的文档默认源码模式。
+
+快捷键：`Ctrl+N` 新建，`Ctrl+O` 打开，`Ctrl+P` 快速打开，`Ctrl+S` 保存，`Ctrl+Shift+S` 另存为，`Ctrl+W` 关闭，`Ctrl+Tab` / `Ctrl+Shift+Tab` 切换标签。macOS 可使用 Command 对应组合。
+
+架构、接口、验收结果和后续开发约束见 [开发记录](docs/load-performance-plan.md)。
+
 ## 项目特点
 
-- 轻量化：Windows 安装包约 1.3 MB，Windows exe 约 2.9 MB。
+- 轻量化：使用系统 WebView，Lite 保持基础渲染；下载体积以对应 Release 产物为准。
 - 软件体积小：适合直接下载、打包、复制和本地使用。
 - 大纲目录：自动提取标题，支持快速跳转。
 - 多种视图：支持阅读、源码编辑、可视化编辑和分屏预览。
@@ -31,22 +47,22 @@ md-view 是一个本地 Markdown 阅读和编辑器，使用 Tauri 2 + Svelte + 
 
 md-view 现在按 Lite / Plus 两个 edition 维护：
 
-- Plus 是主开发基准。新增功能默认先进入 Plus，`plus` 分支是主要开发分支，常规验证也优先覆盖 Plus。
-- Lite 保持体积精简。Lite 只接受缺陷修复、兼容性修复，以及明确指定的简单轻量功能；默认不引入 Plus 的完整 Markdown 渲染、导出、索引和高级阅读设置依赖。
+- `main` 维护共用桌面界面和文件能力，Plus 是高级渲染的开发基准。
+- Lite 与 Plus 共用会话、文件管理、草稿、目录浏览和文件名搜索。工作区标题索引、高级渲染、HTML 导出与高级阅读设置属于 Plus。
 - 默认开发和打包命令指向 Plus。需要构建 Lite 时使用显式的 `:*:lite` 命令。
 
 ## 本地开发
 
 需要先安装：
 
-- Node.js 20+
-- Rust stable
+- Node.js 24 LTS（CI 使用 24）
+- Rust stable，至少 1.88（与锁文件依赖的最低要求一致）
 - 系统对应的 Tauri 桌面依赖
 
 运行：
 
 ```bash
-npm install
+npm ci --registry=https://registry.npmmirror.com/
 npm run tauri:dev
 ```
 
@@ -85,10 +101,35 @@ Edition 构建脚本还会把规范化命名的安装包和 portable exe 复制�
 - macOS: DMG
 - Linux: AppImage, DEB, RPM
 
+这些是构建能力，不表示每个公开 Release 都提供全部平台。当前公开 `v1.0.1` 提供 Windows x64 便携版和 macOS Apple Silicon DMG。
+
 Windows 本地默认使用 NSIS，避免 `all` 目标额外下载 WiX。需要尝试当前系统全部 bundle 目标时运行：
 
 ```bash
 npm run tauri:build:all
+```
+
+## 产品页与在线体验
+
+`site/` 为不加载编辑器的独立中英文介绍页；Svelte 在线体验位于 `/md-view/play/`。
+
+```bash
+npm run build:web
+npm run check:web
+```
+
+桌面前端写入 `dist/`，在线体验中间产物为 `dist-play/`，完整 Pages 产物为 `dist-site/`。默认路径前缀为 `/md-view/`，可通过 `VITE_BASE_PATH` 设置。介绍页与体验页一起部署；首页文案只描述已公开发布的功能。
+
+## 开发检查
+
+```bash
+npm run check
+npm test
+npm run check:editions
+npm run build:lite
+npm run build:plus
+cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+cargo check --manifest-path src-tauri/Cargo.toml --locked
 ```
 
 ## Linux 依赖
@@ -108,12 +149,14 @@ sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev lib
 
 ## GitHub Actions
 
-仓库包含 `.github/workflows/build.yml`：
+`.github/workflows/pages.yml` 对 `main` 的 PR 构建官网与体验页并检查路由；仅 `main` 更新或手动触发时部署 Pages。
 
-- push 到 `plus` / `main` / `master` 时构建全平台
+桌面工作流 `.github/workflows/build.yml`：
+
+- push 到 `plus` / `main` / `master` 时构建 Windows 和 macOS
 - pull request 到 `plus` / `main` / `master` 时运行构建检查
 - 构建矩阵覆盖 Lite / Plus 两个 edition，并在上传产物名里包含 edition 和版本号
-- 手动运行 workflow 时构建全平台
+- 手动运行 workflow 时构建 Windows 和 macOS
 - 推送 `v*` tag 时会创建草稿 Release 并上传构建产物
 
 示例：

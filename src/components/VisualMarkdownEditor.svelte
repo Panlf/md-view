@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount, tick } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
   import DOMPurify from 'dompurify';
   import { marked } from 'marked';
   import { toImageAssetSrc } from '../fileAssets';
@@ -10,8 +10,9 @@
   export let outline: Heading[] = [];
   export let strings: VisualText = text.zh.visual;
   export let filePath = '';
+  export let initialScroll = 0;
 
-  const dispatch = createEventDispatcher<{ change: string }>();
+  const dispatch = createEventDispatcher<{ change: string; position: number }>();
   let host: HTMLElement;
   let lastRendered = '';
   let lastRenderedPath = '';
@@ -28,6 +29,12 @@
   onMount(() => {
     document.execCommand('defaultParagraphSeparator', false, 'p');
     renderEditor(value);
+    void tick().then(() => {
+      if (host) host.scrollTop = initialScroll;
+    });
+  });
+  onDestroy(() => {
+    if (host) dispatch('position', host.scrollTop);
   });
 
   $: if (host && ((value !== lastRendered && value !== lastEmitted) || filePath !== lastRenderedPath)) {
@@ -51,7 +58,10 @@
 
   function buildVisualHtml(source: string) {
     const tokens = marked.lexer(source) as any[];
-    return tokens.map((token, index) => tokenToHtml(token, index)).filter(Boolean).join('\n');
+    return tokens
+      .map((token, index) => tokenToHtml(token, index))
+      .filter(Boolean)
+      .join('\n');
   }
 
   function tokenToHtml(token: any, index: number) {
@@ -258,13 +268,18 @@
   }
 
   function serializeList(node: HTMLElement, ordered: boolean) {
-    const items = Array.from(node.children).filter((child) => child.tagName.toLowerCase() === 'li') as HTMLElement[];
+    const items = Array.from(node.children).filter(
+      (child) => child.tagName.toLowerCase() === 'li'
+    ) as HTMLElement[];
     return items
       .map((item, index) => {
         const marker = ordered ? `${index + 1}. ` : '- ';
         const content = serializeListItem(item);
         const lines = content.split('\n');
-        return `${marker}${lines[0] ?? ''}${lines.slice(1).map((line) => `\n  ${line}`).join('')}`;
+        return `${marker}${lines[0] ?? ''}${lines
+          .slice(1)
+          .map((line) => `\n  ${line}`)
+          .join('')}`;
       })
       .join('\n');
   }
@@ -323,11 +338,7 @@
   }
 
   function escapeHtml(value: string) {
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   function escapeAttribute(value: string) {
@@ -368,14 +379,62 @@
       <option value="blockquote">{strings.quote}</option>
       <option value="pre">{strings.codeBlock}</option>
     </select>
-    <button type="button" title={strings.bold} aria-label={strings.bold} on:mousedown|preventDefault={saveSelection} on:click={() => runCommand('bold')}>B</button>
-    <button type="button" title={strings.italic} aria-label={strings.italic} on:mousedown|preventDefault={saveSelection} on:click={() => runCommand('italic')}><i>I</i></button>
-    <button type="button" title={strings.link} aria-label={strings.link} on:mousedown|preventDefault={saveSelection} on:click={insertLink}>{strings.link}</button>
-    <button type="button" title={strings.unorderedList} aria-label={strings.unorderedList} on:mousedown|preventDefault={saveSelection} on:click={() => runCommand('insertUnorderedList')}>{strings.bulletList}</button>
-    <button type="button" title={strings.orderedList} aria-label={strings.orderedList} on:mousedown|preventDefault={saveSelection} on:click={() => runCommand('insertOrderedList')}>{strings.numberList}</button>
-    <button type="button" title={strings.insertCodeBlock} aria-label={strings.insertCodeBlock} on:mousedown|preventDefault={saveSelection} on:click={insertCodeBlock}>{strings.code}</button>
-    <button type="button" title={strings.insertRule} aria-label={strings.insertRule} on:mousedown|preventDefault={saveSelection} on:click={insertRule}>{strings.rule}</button>
-    <button type="button" title={strings.insertTable} aria-label={strings.insertTable} on:mousedown|preventDefault={saveSelection} on:click={insertTable}>{strings.table}</button>
+    <button
+      type="button"
+      title={strings.bold}
+      aria-label={strings.bold}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={() => runCommand('bold')}>B</button
+    >
+    <button
+      type="button"
+      title={strings.italic}
+      aria-label={strings.italic}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={() => runCommand('italic')}><i>I</i></button
+    >
+    <button
+      type="button"
+      title={strings.link}
+      aria-label={strings.link}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={insertLink}>{strings.link}</button
+    >
+    <button
+      type="button"
+      title={strings.unorderedList}
+      aria-label={strings.unorderedList}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={() => runCommand('insertUnorderedList')}>{strings.bulletList}</button
+    >
+    <button
+      type="button"
+      title={strings.orderedList}
+      aria-label={strings.orderedList}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={() => runCommand('insertOrderedList')}>{strings.numberList}</button
+    >
+    <button
+      type="button"
+      title={strings.insertCodeBlock}
+      aria-label={strings.insertCodeBlock}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={insertCodeBlock}>{strings.code}</button
+    >
+    <button
+      type="button"
+      title={strings.insertRule}
+      aria-label={strings.insertRule}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={insertRule}>{strings.rule}</button
+    >
+    <button
+      type="button"
+      title={strings.insertTable}
+      aria-label={strings.insertTable}
+      on:mousedown|preventDefault={saveSelection}
+      on:click={insertTable}>{strings.table}</button
+    >
   </div>
 
   <article

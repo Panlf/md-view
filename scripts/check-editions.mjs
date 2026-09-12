@@ -15,13 +15,26 @@ const scripts = packageJson.scripts ?? {};
 expect(releaseVersion, 'package.json version is required');
 expectEqual(scripts.dev, 'npm run dev:plus', 'package.json default dev script');
 expectEqual(scripts.build, 'npm run build:plus', 'package.json default build script');
-expectEqual(scripts['build:web'], 'vite build --config vite.app.config.mjs --mode web-plus', 'package.json web build script');
+expectEqual(scripts['build:web'], 'node scripts/build-web.mjs', 'package.json Pages assembly script');
 expectEqual(scripts['tauri:dev'], 'npm run tauri:dev:plus', 'package.json default tauri:dev script');
 expectEqual(scripts['tauri:build'], 'npm run tauri:build:plus', 'package.json default tauri:build script');
 expectEqual(packageLock.version, releaseVersion, 'package-lock.json root version');
 expectEqual(packageLock.packages?.['']?.version, releaseVersion, 'package-lock.json package version');
-expectEqual(readCargoPackageVersion('src-tauri/Cargo.toml'), releaseVersion, 'src-tauri/Cargo.toml package version');
-expectEqual(readJson('src-tauri/tauri.conf.json').version, releaseVersion, 'src-tauri/tauri.conf.json version');
+expectEqual(
+  readCargoPackageVersion('src-tauri/Cargo.toml'),
+  releaseVersion,
+  'src-tauri/Cargo.toml package version'
+);
+expectEqual(
+  readText('src-tauri/Cargo.lock').match(/\[\[package\]\]\r?\nname = "md-view"\r?\nversion = "([^"]+)"/)?.[1],
+  releaseVersion,
+  'src-tauri/Cargo.lock application version'
+);
+expectEqual(
+  readJson('src-tauri/tauri.conf.json').version,
+  releaseVersion,
+  'src-tauri/tauri.conf.json version'
+);
 
 const editionKeys = Object.keys(editionVersions).sort();
 expectEqual(editionKeys.join(','), editions.join(','), 'editionVersions.json edition keys');
@@ -46,7 +59,11 @@ for (const edition of editions) {
 }
 
 const viteConfig = readText('vite.app.config.mjs');
-expectIncludes(viteConfig, 'process.env.VITE_MD_VIEW_VERSION = editionVersions[edition]', 'Vite display version source');
+expectIncludes(
+  viteConfig,
+  'process.env.VITE_MD_VIEW_VERSION = editionVersions[edition]',
+  'Vite display version source'
+);
 expectIncludes(viteConfig, "mode === 'web-plus'", 'Vite web Plus mode');
 expectIncludes(viteConfig, '#edition-app', 'Vite edition app alias');
 expectIncludes(viteConfig, "isWebPlus ? 'WebPlusApp'", 'Vite web Plus app selection');
@@ -62,16 +79,10 @@ expectExcludes(liteApp, 'plusPreferences', 'Lite app Plus preferences dependency
 const plusApp = readText('src/PlusApp.svelte');
 expectIncludes(plusApp, 'PlusSettingsPanel', 'Plus app settings panel');
 expectIncludes(plusApp, 'defaultPlusPreferences', 'Plus app preferences');
-expectIncludes(plusApp, 'indexWorkspaceHeadings', 'Plus app workspace heading index');
+expectIncludes(plusApp, 'enableHeadingSearch={true}', 'Plus workspace heading search capability');
 
 const appShell = readText('src/AppShell.svelte');
-expectIncludes(appShell, 'class="status-bar"', 'shared bottom status bar');
-expectIncludes(appShell, "openToolbarMenu === 'more'", 'shared More menu');
 expectIncludes(appShell, 'if (!isTauri()) return;', 'browser-safe app shell mount');
-expectExcludes(appShell, '📂', 'shared toolbar emoji icons');
-
-const appCss = readText('src/app.css');
-expectIncludes(appCss, 'grid-template-rows: 48px minmax(0, 1fr) 24px;', 'shell command and status rows');
 
 const webPlusApp = readText('src/WebPlusApp.svelte');
 expectIncludes(webPlusApp, 'MarkdownEditor', 'Web Plus editor');
@@ -86,7 +97,11 @@ expectIncludes(editionModule, "isPlusEdition ? 'md-view Plus' : 'md-view Lite'",
 const buildScript = readText('scripts/tauri-build-edition.mjs');
 expectIncludes(buildScript, 'overlay.version = versions[edition]', 'Tauri build version overlay');
 expectIncludes(buildScript, 'const editionPrefix = `md-view-${edition}`', 'Edition artifact prefix');
-expectIncludes(buildScript, 'const editionName = `${editionPrefix}_${overlay.version}_${suffix}`', 'Edition bundle artifact naming');
+expectIncludes(
+  buildScript,
+  'const editionName = `${editionPrefix}_${overlay.version}_${suffix}`',
+  'Edition bundle artifact naming'
+);
 
 const workflow = readText('.github/workflows/build.yml');
 const pullRequestSection = yamlSection(workflow, 'pull_request:');
@@ -94,11 +109,16 @@ expectIncludes(pullRequestSection, '- plus', 'CI pull_request plus branch');
 expectIncludes(workflow, 'edition: lite', 'CI Lite edition matrix');
 expectIncludes(workflow, 'edition: plus', 'CI Plus edition matrix');
 expectIncludes(workflow, 'tauri:build:${{ matrix.edition }}', 'CI edition build command');
-expectIncludes(workflow, 'md-view-${{ matrix.edition }}-${{ steps.edition-version.outputs.version }}-${{ matrix.platform }}', 'CI artifact name');
+expectIncludes(
+  workflow,
+  'md-view-${{ matrix.edition }}-${{ steps.edition-version.outputs.version }}-${{ matrix.platform }}',
+  'CI artifact name'
+);
 
 const pagesWorkflow = readText('.github/workflows/pages.yml');
 expectIncludes(pagesWorkflow, 'npm run build:web', 'Pages web build command');
 expectIncludes(pagesWorkflow, 'actions/deploy-pages', 'Pages deploy action');
+expectIncludes(pagesWorkflow, 'path: dist-site', 'Pages product site output');
 
 if (errors.length > 0) {
   console.error('Edition consistency check failed:');

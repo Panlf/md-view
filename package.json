@@ -1,6 +1,6 @@
 {
   "name": "md-view",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Local Markdown reader and editor built with Tauri and Svelte.",
   "license": "WTFPL",
   "type": "module",
@@ -11,7 +11,11 @@
     "build": "npm run build:plus",
     "build:lite": "vite build --config vite.app.config.mjs --mode lite",
     "build:plus": "vite build --config vite.app.config.mjs --mode plus",
-    "build:web": "vite build --config vite.app.config.mjs --mode web-plus",
+    "build:web": "node scripts/build-web.mjs",
+    "build:site": "node scripts/build-site.mjs",
+    "build:play": "vite build --config vite.app.config.mjs --mode web-plus --outDir dist-play",
+    "test": "vitest run",
+    "check:web": "node scripts/check-web.mjs",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:editions": "node scripts/check-editions.mjs",
     "tauri": "tauri",
@@ -56,9 +60,13 @@
     "@tauri-apps/cli": "^2.11.2",
     "@tsconfig/svelte": "^5.0.4",
     "esbuild": "^0.27.2",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.8.1",
+    "prettier-plugin-svelte": "^3.4.1",
     "svelte-check": "^4.1.4",
     "tslib": "^2.8.1",
     "typescript": "^5.8.2",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^4.0.18"
   }
 }

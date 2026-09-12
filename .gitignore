@@ -5,6 +5,9 @@ node_modules/
 # Frontend build output
 dist/
 dist-ssr/
+dist-site/
+dist-play/
+.local/
 .tauri-edition/
 *.tsbuildinfo
 src/**/*.js

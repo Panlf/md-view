@@ -48,7 +48,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -68,6 +68,11 @@ jobs:
 
       - name: Check edition consistency
         run: npm run check:editions
+
+      - name: Check file behavior
+        run: |
+          npm test
+          cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
       - name: Read edition version
         id: edition-version

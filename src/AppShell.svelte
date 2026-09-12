@@ -1,49 +1,43 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { confirm, message, open, save } from '@tauri-apps/plugin-dialog';
+  import { onMount, tick } from 'svelte';
+  import { open, save } from '@tauri-apps/plugin-dialog';
   import { convertFileSrc, isTauri } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import {
     BookOpen,
-    ChevronDown,
-    Code2,
-    Columns2,
-    Ellipsis,
-    FileText,
-    Folder,
+    FilePlus2,
     FolderOpen,
-    Image as ImageIcon,
-    Languages,
-    Maximize2,
-    Palette,
-    Pencil,
-    RefreshCw,
     Save,
+    Search,
     Settings,
-    Star,
-    Trash2
+    PanelLeft,
+    PanelRight,
+    X,
+    Code2,
+    Pencil,
+    Columns2,
+    Maximize2
   } from 'lucide-svelte';
-  import FileTree from './components/FileTree.svelte';
+  import DocumentTabs from './components/DocumentTabs.svelte';
+  import FileBrowser from './components/FileBrowser.svelte';
+  import QuickOpen from './components/QuickOpen.svelte';
+  import TextPrompt from './components/TextPrompt.svelte';
   import MarkdownPreview from './components/MarkdownPreview.svelte';
   import OutlinePanel from './components/OutlinePanel.svelte';
-  import { appVersion } from './edition';
-  import { formatText, loadLanguage, nextLanguage, saveLanguage, text, type Language } from './i18n';
+  import { createDesktop } from './state/desktop';
+  import { dirty, filename, parentPath } from './state/documents';
   import { extractHeadingsFromMarkdown } from './outline';
   import { applyTheme, BACKGROUND_IMAGE_STORAGE_KEY, findTheme, THEME_STORAGE_KEY, themes } from './themes';
-  import type { AppTheme, FileNode, Heading, ReadFileResult, ViewMode, WorkspaceHeading } from './types';
-  import {
-    clearWorkspaceDrafts,
-    deleteDraft,
-    initialOpenPaths,
-    openDefaultAppSettings,
-    openPath,
-    openWorkspace,
-    readDraft,
-    readFile,
-    saveFile,
-    writeDraft
-  } from './tauri';
+  import { loadLanguage, saveLanguage, text, type Language } from './i18n';
+  import { appVersion } from './edition';
+  import * as api from './api';
+  import type { DirectoryEntry, Heading, ViewMode } from './types';
+  import type { SearchItem } from './state/search';
+  import { modalFocus } from './state/modal';
+  import type { EditorState } from '@codemirror/state';
+  import './desktop.css';
 
   export let editionDisplayName = 'md-view';
   export let defaultPreviewPreferences: any = undefined;
@@ -51,1195 +45,789 @@
   export let savePreviewPreferences: ((preferences: any) => void) | undefined = undefined;
   export let previewReaderStyle: ((preferences: any) => string) | undefined = undefined;
   export let markdownStatus = '';
-  export let settingsButtonLabel = '';
-  export let settingsButtonTitle = '';
-  export let settingsUpdatedStatus = '设置已更新';
   export let settingsPanelComponent: any = null;
-  export let refreshWorkspaceHeadings: ((workspace: string) => Promise<WorkspaceHeading[]>) | undefined = undefined;
+  export let enableHeadingSearch = false;
   export let exportHtmlFile: ((path: string, html: string) => Promise<void>) | undefined = undefined;
 
-  let workspacePath = '';
-  let tree: FileNode | null = null;
-  let selectedPath = '';
-  let content = '';
-  let savedContent = '';
-  let encoding = '';
-  let modifiedAt: number | null = null;
-  let outline: Heading[] = [];
-  let mode: ViewMode = 'read';
-  let language: Language = 'zh';
-  let t = text.zh;
-  let status = t.status.ready;
-  let renderStatus = markdownStatus;
-  let previewPreferences: any = defaultPreviewPreferences;
+  const desktop = createDesktop();
+  const { documents, workspace, search, preferences, status, saving, prompt } = desktop;
+  let language: Language = loadLanguage();
+  let previewPreferences = loadPreviewPreferences?.() ?? defaultPreviewPreferences;
+  let selectedTheme = findTheme(localStorage.getItem(THEME_STORAGE_KEY));
+  let backgroundPath = localStorage.getItem(BACKGROUND_IMAGE_STORAGE_KEY) || '';
+  let backgroundUrl = '';
+  let readingFocusEnabled = localStorage.getItem('md-view-reading-focus-enabled') !== 'false';
   let settingsOpen = false;
-  let renderedHtml = '';
-  let linkStatus = { broken: 0, total: 0 };
-  let activeOutlineLine = 0;
-  let readingProgress = 0;
-  let readingFocusEnabled = true;
-  let workspaceHeadings: WorkspaceHeading[] = [];
-  let headingSearch = '';
-  let headingIndexBusy = false;
-  let busy = false;
-  let defaultSettingsBusy = false;
-  let dirty = false;
+  let advancedOpen = false;
+  let quickOpen = false;
+  let excludesText = '';
+  let immersive = false;
   let dropActive = false;
-  let openToolbarMenu: 'open' | 'appearance' | 'more' | null = null;
-  let selectedTheme: AppTheme = themes[0];
-  let backgroundImagePath = '';
-  let backgroundImageUrl = '';
-  let backgroundImageLoadToken = 0;
-  let leftSidebarCollapsed = false;
-  let rightSidebarCollapsed = false;
-  let askBeforeLeaveSave = false;
-  let immersiveMode = false;
-  let closeInProgress = false;
-  let lastWindowTitle = '';
-  let draftTimer: number | undefined;
-  let outlineTimer: number | undefined;
-  let workspaceRefreshToken = 0;
-  let MarkdownEditorComponent: any = null;
-  let VisualMarkdownEditorComponent: any = null;
-  let editorLoadPromise: Promise<void> | null = null;
-  let visualEditorLoadPromise: Promise<void> | null = null;
-  let editorRef: any;
+  let contextMenu: { entry: DirectoryEntry; x: number; y: number } | null = null;
+  let Editor: any = null;
+  let VisualEditor: any = null;
+  let editorPromise: Promise<void> | null = null;
+  let visualPromise: Promise<void> | null = null;
   let previewRef: MarkdownPreview;
+  let editorRef: any;
   let visualRef: any;
+  let renderedHtml = '';
+  let renderedKey = '';
+  let readingProgress = 0;
+  let activeLine = 0;
+  let linkStatus = { broken: 0, total: 0 };
+  let closeInProgress = false;
+  let lastTitle = '';
+  let outline: Heading[] = [];
+  let outlineKey = '';
+  let outlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingJump: { id: string; line?: number; anchor?: string } | null = null;
+  let drag: { side: 'left' | 'right'; start: number; width: number } | null = null;
 
-  const LEFT_SIDEBAR_COLLAPSED_KEY = 'md-view-left-sidebar-collapsed';
-  const RIGHT_SIDEBAR_COLLAPSED_KEY = 'md-view-right-sidebar-collapsed';
-  const AUTO_SAVE_ENABLED_KEY = 'md-view-auto-save-enabled';
-  const ASK_BEFORE_LEAVE_SAVE_KEY = 'md-view-ask-before-leave-save';
-  const READING_FOCUS_ENABLED_KEY = 'md-view-reading-focus-enabled';
+  $: active = $documents.tabs.find((doc) => doc.id === $documents.activeId);
   $: t = text[language];
-  $: rootNodes = tree ? tree.children : [];
-  $: fileName = selectedPath ? selectedPath.split(/[\\/]/).pop() ?? selectedPath : '';
-  $: appDisplayTitle = appVersion ? `${editionDisplayName} ${appVersion}` : editionDisplayName;
-  $: contentPaneStyle = [backgroundImageUrl ? `--reader-background-image: url("${backgroundImageUrl}")` : '', previewReaderStyle ? previewReaderStyle(previewPreferences) : '']
-    .filter(Boolean)
-    .join('; ');
-  $: hasSettingsPanel = Boolean(settingsPanelComponent);
-  $: hasWorkspaceHeadingIndex = Boolean(refreshWorkspaceHeadings);
-  $: workspaceStyle = [
-    `--left-sidebar-width: ${leftSidebarCollapsed ? '44px' : '280px'}`,
-    `--right-sidebar-width: ${rightSidebarCollapsed ? '44px' : '240px'}`
-  ].join('; ');
-  $: readingProgressLabel = language === 'zh' ? `阅读 ${readingProgress}%` : `Read ${readingProgress}%`;
-  $: void syncWindowTitle(fileName, dirty);
-
-  async function chooseFile() {
-    const selected = await open({
-      multiple: false,
-      title: t.dialogs.chooseTextFile
-    });
-    if (typeof selected !== 'string') return;
-    await loadPath(selected);
-  }
-
-  async function chooseWorkspace() {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: t.dialogs.chooseMarkdownDir
-    });
-    if (typeof selected !== 'string') return;
-    await loadWorkspace(selected);
-  }
-
-  async function loadWorkspace(path: string) {
-    await loadPath(path);
-  }
-
-  async function loadPath(path: string) {
-    if (!(await ensureSafeToLeave())) return;
-    busy = true;
-    status = t.status.opening;
-    try {
-      const result = await openPath(path);
-      if (!result.tree || !result.workspace_path) {
-        throw new Error('打开结果缺少工作区信息');
-      }
-
-      applyWorkspace(result.tree, result.workspace_path, result.kind === 'workspace');
-
-      if (result.kind === 'file') {
-        if (!result.file) {
-          throw new Error('打开结果缺少文件内容');
-        }
-        await openReadResult(result.file);
-        void refreshWorkspaceInBackground(result.workspace_path);
-      } else {
-        status = t.status.folderOpened;
-      }
-    } catch (error) {
-      status = t.status.openFailed;
-      await message(String(error), { title: t.dialogs.openFailed, kind: 'error' });
-    } finally {
-      busy = false;
-    }
-  }
-
-  function applyWorkspace(nextTree: FileNode, nextPath: string, resetFile: boolean) {
-    tree = nextTree;
-    workspacePath = nextPath;
-    if (refreshWorkspaceHeadings) {
-      window.setTimeout(() => {
-        void refreshHeadingIndex(nextPath);
-      }, 0);
-    }
-    if (resetFile) {
-      clearCurrentFile();
-    }
-  }
-
-  async function refreshWorkspaceInBackground(path: string) {
-    const token = ++workspaceRefreshToken;
-    try {
-      const nextTree = await openWorkspace(path);
-      if (token !== workspaceRefreshToken || path !== workspacePath) return;
-      tree = nextTree;
-    } catch {
-      // The opened file is already available; keep the lightweight tree if a background refresh fails.
-    }
-  }
-
-  function clearCurrentFile() {
-    selectedPath = '';
-    content = '';
-    savedContent = '';
-    encoding = '';
-    outline = [];
+  $: currentKey = active ? `${active.id}:${active.version}` : '';
+  $: if (currentKey !== renderedKey) {
+    renderedKey = currentKey;
     renderedHtml = '';
-    linkStatus = { broken: 0, total: 0 };
-    activeOutlineLine = 0;
-    readingProgress = 0;
-    dirty = false;
-    modifiedAt = null;
+  }
+  $: if (currentKey !== outlineKey) {
+    outlineKey = currentKey;
+    updateOutline();
+  }
+  $: if (active?.mode === 'edit' || active?.mode === 'split') void loadEditor();
+  $: if (active?.mode === 'visual') void loadVisual();
+  $: void syncTitle(
+    active
+      ? `${dirty(active) ? '● ' : ''}${filename(active.path)} — ${editionDisplayName}`
+      : editionDisplayName
+  );
+  $: openPaths = $documents.tabs.map((doc) => doc.path).join('\0');
+  $: recentPaths = $preferences.recent.join('\0');
+  $: localItems = collectLocalItems(openPaths, recentPaths, $workspace);
+  $: paneStyle = `${previewReaderStyle?.(previewPreferences) || ''};${backgroundUrl ? `--reader-background-image:url("${backgroundUrl}");` : ''}`;
+  function collectLocalItems(_open: string, _recent: string, _workspace: unknown) {
+    return desktop.localSearchItems();
   }
 
-  async function refreshWorkspace() {
-    if (!workspacePath) return;
-    busy = true;
-    try {
-      tree = await openWorkspace(workspacePath);
-      if (refreshWorkspaceHeadings) {
-        window.setTimeout(() => {
-          void refreshHeadingIndex(workspacePath);
-        }, 0);
-      }
-      status = t.status.folderRefreshed;
-    } catch (error) {
-      status = t.status.refreshFailed;
-      await message(String(error), { title: t.dialogs.refreshFailed, kind: 'error' });
-    } finally {
-      busy = false;
+  function updateOutline() {
+    clearTimeout(outlineTimer);
+    const doc = active;
+    if (!doc) {
+      outline = [];
+      return;
     }
+    const compute = () => {
+      if (active?.id === doc.id && active.version === doc.version)
+        outline = extractHeadingsFromMarkdown(doc.content);
+    };
+    if (doc.mode === 'read') compute();
+    else outlineTimer = setTimeout(compute, 200);
   }
-
-  async function ensureSafeToLeave() {
-    if (!dirty) return true;
-    window.clearTimeout(draftTimer);
-
-    if (!askBeforeLeaveSave) {
-      discardCurrentChanges(false);
-      return true;
-    }
-
-    const choice = await message(t.dialogs.unsavedMessage, {
-      title: t.dialogs.unsavedTitle,
-      kind: 'warning',
-      buttons: { yes: t.buttons.yes, no: t.buttons.no, cancel: t.buttons.cancel }
+  async function loadEditor() {
+    editorPromise ??= import('./components/MarkdownEditor.svelte').then((module) => {
+      Editor = module.default;
     });
-
-    if (choice === 'Cancel') {
-      return false;
-    }
-    if (choice === 'Yes') {
-      return saveCurrent();
-    }
-
-    discardCurrentChanges(true);
-    return true;
-  }
-
-  async function selectFile(path: string) {
-    if (path === selectedPath) return;
-    if (!(await ensureSafeToLeave())) return;
-    busy = true;
-    status = t.status.readingFile;
     try {
-      const result = await readFile(path);
-      await openReadResult(result);
+      await editorPromise;
     } catch (error) {
-      status = t.status.readFailed;
-      await message(String(error), { title: t.dialogs.readFailed, kind: 'error' });
-    } finally {
-      busy = false;
+      editorPromise = null;
+      status.set(`编辑器加载失败：${String(error)}`);
     }
   }
-
-  async function openReadResult(result: ReadFileResult) {
-    selectedPath = result.path;
-    content = result.content;
-    savedContent = result.content;
-    encoding = result.encoding;
-    modifiedAt = result.modified_at;
-    dirty = false;
-    mode = 'read';
-    activeOutlineLine = 0;
-    readingProgress = 0;
-    renderedHtml = '';
-    linkStatus = { broken: 0, total: 0 };
-
-    const draft = askBeforeLeaveSave ? await readDraft(result.path) : null;
-    if (draft && draft.content !== result.content) {
-      const restore = await confirm(t.dialogs.restoreDraftMessage, {
-        title: t.dialogs.restoreDraftTitle,
-        kind: 'info'
-      });
-      if (restore) {
-        content = draft.content;
-        dirty = true;
-        status = t.status.draftRestored;
+  async function loadVisual() {
+    visualPromise ??= import('./components/VisualMarkdownEditor.svelte').then((module) => {
+      VisualEditor = module.default;
+    });
+    try {
+      await visualPromise;
+    } catch (error) {
+      visualPromise = null;
+      status.set(`可视化编辑器加载失败：${String(error)}`);
+    }
+  }
+  function setMode(mode: ViewMode) {
+    if (active) documents.patch(active.id, { mode });
+  }
+  function openSettings() {
+    excludesText = $preferences.excludes.join('\n');
+    settingsOpen = true;
+  }
+  function setTheme(id: string) {
+    selectedTheme = findTheme(id);
+    applyTheme(selectedTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, id);
+  }
+  function setLanguage(value: Language) {
+    language = value;
+    saveLanguage(value);
+  }
+  async function chooseBackground() {
+    const path = await open({
+      title: '选择阅读背景',
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+    });
+    if (typeof path === 'string') {
+      backgroundPath = path;
+      localStorage.setItem(BACKGROUND_IMAGE_STORAGE_KEY, path);
+      setBackground(path);
+    }
+  }
+  function setBackground(path: string) {
+    if (!path) {
+      backgroundUrl = '';
+      return;
+    }
+    const image = new Image();
+    const url = convertFileSrc(path);
+    image.onload = () => {
+      if (backgroundPath === path) backgroundUrl = url;
+    };
+    image.onerror = () => {
+      if (backgroundPath === path) {
+        backgroundUrl = '';
+        status.set('背景图片无法读取，请重新选择');
       }
-    }
-
-    updateOutlineNow();
-    status = dirty ? t.status.draftRestored : t.status.fileOpened;
+    };
+    image.src = url;
   }
-
-  function setRenderStatus(nextStatus: string) {
-    renderStatus = markdownStatus ? nextStatus : '';
+  function clearBackground() {
+    backgroundPath = '';
+    backgroundUrl = '';
+    localStorage.removeItem(BACKGROUND_IMAGE_STORAGE_KEY);
   }
-
-  function setReadingProgress(nextProgress: number) {
-    readingProgress = Math.max(0, Math.min(100, Math.round(nextProgress)));
-  }
-
   function setPreviewPreferences(next: any) {
     previewPreferences = next;
     savePreviewPreferences?.(next);
-    status = settingsUpdatedStatus;
   }
-
-  function resetPreviewPreferences() {
-    setPreviewPreferences(defaultPreviewPreferences);
-  }
-
-  async function refreshHeadingIndex(path: string) {
-    if (!path) return;
-    if (!refreshWorkspaceHeadings) return;
-    headingIndexBusy = true;
-    try {
-      workspaceHeadings = await refreshWorkspaceHeadings(path);
-      status = `标题索引完成：${workspaceHeadings.length} 项`;
-    } catch (error) {
-      status = `标题索引失败：${String(error)}`;
-    } finally {
-      headingIndexBusy = false;
-    }
-  }
-
-  function setContent(next: string) {
-    content = next;
-    dirty = content !== savedContent;
-    if (!dirty) {
-      window.clearTimeout(draftTimer);
-      if (selectedPath) {
-        void deleteDraft(selectedPath);
-      }
-    }
-    scheduleDraft();
-    scheduleOutline();
-  }
-
-  function handleEditorChange(event: CustomEvent<string>) {
-    setContent(event.detail);
-  }
-
-  function scheduleDraft() {
-    if (!askBeforeLeaveSave || !selectedPath || content === savedContent) return;
-    window.clearTimeout(draftTimer);
-    draftTimer = window.setTimeout(async () => {
-      try {
-        await writeDraft(selectedPath, content);
-        status = t.status.draftSaved;
-      } catch (error) {
-        status = `${t.status.draftFailed}: ${String(error)}`;
-      }
-    }, 900);
-  }
-
-  async function flushDraft() {
-    if (!askBeforeLeaveSave || !selectedPath || !dirty) return;
-    window.clearTimeout(draftTimer);
-    await writeDraft(selectedPath, content);
-  }
-
-  function scheduleOutline() {
-    window.clearTimeout(outlineTimer);
-    outlineTimer = window.setTimeout(updateOutlineNow, 250);
-  }
-
-  function updateOutlineNow() {
-    outline = extractHeadingsFromMarkdown(content);
-  }
-
-  async function saveCurrent(overwrite = false): Promise<boolean> {
-    if (!selectedPath || !dirty) return true;
-    busy = true;
-    status = t.status.saving;
-    try {
-      window.clearTimeout(draftTimer);
-      const result = await saveFile(selectedPath, content, modifiedAt, overwrite);
-      if (result.conflict) {
-        const allowOverwrite = await confirm(result.message ?? t.dialogs.diskChanged, {
-          title: t.dialogs.saveConflictTitle,
-          kind: 'warning'
-        });
-        if (allowOverwrite) {
-          return await saveCurrent(true);
-        } else {
-          status = t.status.saveCancelled;
-          return false;
-        }
-      }
-      if (result.ok) {
-        savedContent = content;
-        modifiedAt = result.modified_at ?? modifiedAt;
-        dirty = false;
-        await deleteDraft(selectedPath);
-        status = t.status.saved;
-        return true;
-      }
-      return false;
-    } catch (error) {
-      status = t.status.saveFailed;
-      await message(String(error), { title: t.dialogs.saveFailed, kind: 'error' });
-      return false;
-    } finally {
-      busy = false;
-    }
-  }
-
-  function discardCurrentChanges(deleteCurrentDraft: boolean) {
-    window.clearTimeout(draftTimer);
-    if (deleteCurrentDraft && selectedPath) {
-      void deleteDraft(selectedPath);
-    }
-    dirty = false;
-  }
-
-  function jumpToHeading(heading: Heading) {
-    if (mode === 'edit') {
-      editorRef?.focusLine(heading.line);
-      return;
-    }
-    if (mode === 'visual') {
-      visualRef?.scrollToLine(heading.line);
-      return;
-    }
-    previewRef?.scrollToLine(heading.line);
-    editorRef?.focusLine(heading.line);
-  }
-
-  async function setMode(next: ViewMode) {
-    try {
-      if (next === 'edit' || next === 'split') {
-        await ensureMarkdownEditorLoaded();
-      }
-      if (next === 'visual') {
-        await ensureVisualEditorLoaded();
-      }
-    } catch (error) {
-      status = `${t.status.editorLoadFailed}: ${String(error)}`;
-      return;
-    }
-    mode = next;
-  }
-
-  async function ensureMarkdownEditorLoaded() {
-    if (MarkdownEditorComponent) return;
-    status = t.status.loadingEditor;
-    editorLoadPromise ??= import('./components/MarkdownEditor.svelte').then((module) => {
-      MarkdownEditorComponent = module.default;
+  async function applyExcludes() {
+    desktop.setPreferences({
+      ...$preferences,
+      excludes: excludesText
+        .split('\n')
+        .map((p) => p.trim())
+        .filter(Boolean)
     });
-    await editorLoadPromise;
+    if ($workspace.root) await desktop.openWorkspace($workspace.root);
   }
-
-  async function ensureVisualEditorLoaded() {
-    if (VisualMarkdownEditorComponent) return;
-    status = t.status.loadingVisualEditor;
-    visualEditorLoadPromise ??= import('./components/VisualMarkdownEditor.svelte').then((module) => {
-      VisualMarkdownEditorComponent = module.default;
-    });
-    await visualEditorLoadPromise;
-  }
-
-  function toggleToolbarMenu(menu: 'open' | 'appearance' | 'more') {
-    openToolbarMenu = openToolbarMenu === menu ? null : menu;
-  }
-
-  function closeToolbarMenu() {
-    openToolbarMenu = null;
-  }
-
-  function handleWindowClick(event: MouseEvent) {
-    const target = event.target as Element | null;
-    if (target?.closest('.toolbar-menu')) return;
-    closeToolbarMenu();
-  }
-
-  function setReadingFocusEnabled(enabled: boolean) {
-    readingFocusEnabled = enabled;
-    localStorage.setItem(READING_FOCUS_ENABLED_KEY, String(enabled));
-  }
-
-  function setLeftSidebarCollapsed(collapsed: boolean) {
-    leftSidebarCollapsed = collapsed;
-    localStorage.setItem(LEFT_SIDEBAR_COLLAPSED_KEY, String(collapsed));
-  }
-
-  function setRightSidebarCollapsed(collapsed: boolean) {
-    rightSidebarCollapsed = collapsed;
-    localStorage.setItem(RIGHT_SIDEBAR_COLLAPSED_KEY, String(collapsed));
-  }
-
-  async function setAskBeforeLeaveSave(enabled: boolean) {
-    askBeforeLeaveSave = enabled;
-    localStorage.setItem(AUTO_SAVE_ENABLED_KEY, String(enabled));
-    localStorage.removeItem(ASK_BEFORE_LEAVE_SAVE_KEY);
-    window.clearTimeout(draftTimer);
-
-    if (enabled) {
-      status = t.status.autoSaveOn;
-      scheduleDraft();
-      return;
-    }
-
-    if (workspacePath) {
-      const removed = await clearWorkspaceDrafts(workspacePath);
-      status = removed > 0 ? formatText(t.status.autoSaveOffWithRemoved, { count: removed }) : t.status.autoSaveOff;
-    } else {
-      status = t.status.autoSaveOff;
-    }
-  }
-
-  function setTheme(themeId: string) {
-    selectedTheme = findTheme(themeId);
-    applyTheme(selectedTheme);
-    localStorage.setItem(THEME_STORAGE_KEY, selectedTheme.id);
-    status = formatText(t.status.themeChanged, { theme: themeLabel(selectedTheme) });
-  }
-
-  async function chooseBackgroundImage() {
-    const selected = await open({
-      multiple: false,
-      title: t.dialogs.chooseBackgroundImage,
-      filters: [
-        {
-          name: t.dialogs.imageFilter,
-          extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
-        }
-      ]
-    });
-    if (typeof selected !== 'string') return;
-    applyBackgroundImage(selected, true, t.status.backgroundApplied);
-  }
-
-  function applyBackgroundImage(path: string, persist: boolean, successStatus?: string) {
-    const token = ++backgroundImageLoadToken;
-    const url = convertFileSrc(path);
-    const probe = new Image();
-
-    probe.onload = () => {
-      if (token !== backgroundImageLoadToken) return;
-      backgroundImagePath = path;
-      backgroundImageUrl = url;
-      if (persist) {
-        localStorage.setItem(BACKGROUND_IMAGE_STORAGE_KEY, path);
-      }
-      if (successStatus) {
-        status = successStatus;
-      }
-    };
-
-    probe.onerror = () => {
-      if (token !== backgroundImageLoadToken) return;
-      backgroundImagePath = '';
-      backgroundImageUrl = '';
-      if (persist) {
-        localStorage.removeItem(BACKGROUND_IMAGE_STORAGE_KEY);
-      }
-      status = t.status.backgroundUnavailable;
-    };
-
-    probe.src = url;
-  }
-
-  function clearBackgroundImage() {
-    backgroundImageLoadToken += 1;
-    backgroundImagePath = '';
-    backgroundImageUrl = '';
-    localStorage.removeItem(BACKGROUND_IMAGE_STORAGE_KEY);
-    status = t.status.backgroundCleared;
-  }
-
-  function restoreAppearanceSettings() {
-    language = loadLanguage();
-    if (loadPreviewPreferences) {
-      previewPreferences = loadPreviewPreferences();
-    }
-    selectedTheme = findTheme(localStorage.getItem(THEME_STORAGE_KEY));
-    applyTheme(selectedTheme);
-    leftSidebarCollapsed = localStorage.getItem(LEFT_SIDEBAR_COLLAPSED_KEY) === 'true';
-    rightSidebarCollapsed = localStorage.getItem(RIGHT_SIDEBAR_COLLAPSED_KEY) === 'true';
-    readingFocusEnabled = localStorage.getItem(READING_FOCUS_ENABLED_KEY) !== 'false';
-    const storedAutoSave = localStorage.getItem(AUTO_SAVE_ENABLED_KEY);
-    askBeforeLeaveSave =
-      storedAutoSave !== null ? storedAutoSave === 'true' : localStorage.getItem(ASK_BEFORE_LEAVE_SAVE_KEY) === 'true';
-    localStorage.setItem(AUTO_SAVE_ENABLED_KEY, String(askBeforeLeaveSave));
-
-    const savedBackgroundPath = localStorage.getItem(BACKGROUND_IMAGE_STORAGE_KEY);
-    if (!savedBackgroundPath) return;
-    applyBackgroundImage(savedBackgroundPath, true);
-  }
-
-  async function openDefaultSettings() {
-    if (defaultSettingsBusy) return;
-    defaultSettingsBusy = true;
-    status = t.status.openingDefaultSettings;
+  async function syncTitle(title: string) {
+    if (title === lastTitle || !isTauri()) return;
+    lastTitle = title;
     try {
-      await openDefaultAppSettings();
-      status = t.status.openedDefaultSettings;
-    } catch (error) {
-      status = t.status.defaultSettingsFailed;
-      await message(String(error), { title: t.dialogs.settingsFailed, kind: 'error' });
-    } finally {
-      defaultSettingsBusy = false;
-    }
+      await getCurrentWindow().setTitle(title);
+    } catch {}
   }
-
-  async function openDroppedPath(paths: string[]) {
-    const path = paths[0];
-    if (!path) return;
-    await loadPath(path);
-  }
-
-  async function setImmersiveMode(enabled: boolean) {
+  async function toggleImmersive() {
     try {
-      await getCurrentWindow().setFullscreen(enabled);
-      immersiveMode = enabled;
-      status = enabled ? t.status.immersiveOn : t.status.immersiveOff;
+      immersive = !(await getCurrentWindow().isFullscreen());
+      await getCurrentWindow().setFullscreen(immersive);
     } catch (error) {
-      status = enabled ? t.status.immersiveOnFailed : t.status.immersiveOffFailed;
-      await message(String(error), { title: t.dialogs.immersiveFailed, kind: 'error' });
+      await desktop.error(error);
     }
   }
-
-  async function toggleImmersiveMode() {
-    const fullscreen = await getCurrentWindow().isFullscreen();
-    await setImmersiveMode(!fullscreen);
-  }
-
-  async function requestAppClose() {
+  async function closeWindow() {
     if (closeInProgress) return;
     closeInProgress = true;
     try {
-      if (await ensureSafeToLeave()) {
-        await getCurrentWindow().destroy();
-      }
-    } catch (error) {
-      status = t.status.closeFailed;
-      await message(String(error), { title: t.dialogs.closeFailed, kind: 'error' });
+      if (await desktop.closeAll()) await getCurrentWindow().destroy();
+    } catch (cause) {
+      await desktop.flushDrafts().catch(() => {});
+      await desktop.error(cause);
     } finally {
       closeInProgress = false;
     }
   }
-
-  async function syncWindowTitle(currentFileName: string, hasUnsavedChanges: boolean) {
-    const title = currentFileName ? `${hasUnsavedChanges ? '● ' : ''}${currentFileName} - md-view` : 'md-view';
-    if (title === lastWindowTitle) return;
-    lastWindowTitle = title;
-    try {
-      await getCurrentWindow().setTitle(title);
-    } catch {
-      // Title updates are cosmetic; avoid interrupting editing if the window API is unavailable.
+  function headingJump(heading: Heading) {
+    if (active?.mode === 'visual') visualRef?.scrollToLine(heading.line);
+    else {
+      previewRef?.scrollToLine(heading.line);
+      editorRef?.focusLine(heading.line);
     }
   }
-
-  function themeLabel(theme: AppTheme) {
-    return t.themeNames[theme.id as keyof typeof t.themeNames] ?? theme.name;
+  async function selectSearch(item: SearchItem) {
+    quickOpen = false;
+    const id = await desktop.openFile(item.path);
+    if (id && (item.line || item.anchor)) {
+      documents.patch(id, { mode: 'read' });
+      pendingJump = { id, line: item.line, anchor: item.anchor };
+      await tick();
+      applyPendingJump();
+    }
   }
-
-  async function exportCurrentHtml() {
-    if (!exportHtmlFile || !selectedPath || !renderedHtml) return;
-    const selected = await save({
+  function applyPendingJump() {
+    if (!pendingJump || pendingJump.id !== active?.id || !previewRef || !renderedHtml) return;
+    const jump = pendingJump;
+    pendingJump = null;
+    requestAnimationFrame(() => {
+      if (active?.id !== jump.id) return;
+      if (jump.anchor) previewRef?.scrollToAnchor(jump.anchor);
+      else if (jump.line) previewRef?.scrollToLine(jump.line);
+    });
+  }
+  function acceptHtml(html: string) {
+    renderedHtml = html;
+    applyPendingJump();
+  }
+  async function exportHtml() {
+    if (!active || !renderedHtml || !exportHtmlFile) return;
+    const title = filename(active.path).replace(/[&<>"']/g, '');
+    const body = renderedHtml;
+    const exportLanguage = language;
+    const path = await save({
       title: '导出 HTML',
-      defaultPath: `${fileName || 'md-view'}.html`,
+      defaultPath: `${filename(active.path)}.html`,
       filters: [{ name: 'HTML', extensions: ['html'] }]
     });
-    if (typeof selected !== 'string') return;
-    const outputPath = selected.toLowerCase().endsWith('.html') ? selected : `${selected}.html`;
+    if (!path) return;
+    const html = `<!doctype html><html lang="${exportLanguage}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font:16px/1.75 system-ui,sans-serif;max-width:920px;margin:40px auto;padding:0 24px;color:#243330}img{max-width:100%}pre{overflow:auto;padding:16px;background:#f2f5f4}table{border-collapse:collapse;display:block;overflow:auto}td,th{border:1px solid #ccd7d3;padding:8px}blockquote{border-left:3px solid #91aaa1;padding-left:16px}</style></head><body><article>${body}</article></body></html>`;
     try {
-      await exportHtmlFile(outputPath, buildExportHtml());
-      status = 'HTML 已导出';
+      await exportHtmlFile(path, html);
+      status.set('HTML 已导出');
     } catch (error) {
-      status = `HTML 导出失败：${String(error)}`;
+      await desktop.error(error);
     }
   }
-
-  function printCurrentDocument() {
-    if (!hasSettingsPanel) return;
-    window.print();
+  function menu(entry: DirectoryEntry, x: number, y: number) {
+    contextMenu = {
+      entry,
+      x: Math.min(x, window.innerWidth - 210),
+      y: Math.max(8, Math.min(y, window.innerHeight - 340))
+    };
   }
-
-  function buildExportHtml() {
-    const title = fileName || 'md-view export';
-    const themeVars = Object.entries(selectedTheme.tokens)
-      .map(([key, value]) => `--${key.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`)}:${value};`)
-      .join('');
-    return [
-      '<!doctype html>',
-      '<html lang="zh-CN">',
-      '<head>',
-      '<meta charset="utf-8">',
-      `<title>${escapeHtml(title)}</title>`,
-      '<style>',
-      `:root{${themeVars}${previewReaderStyle ? previewReaderStyle(previewPreferences) : ''}}`,
-      'body{margin:0;background:var(--content-bg);color:var(--markdown-text);font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",system-ui,sans-serif;}',
-      '.markdown-preview{max-width:var(--reader-max-width);margin:0 auto;padding:40px min(7vw,72px);font-size:var(--reader-font-size);line-height:var(--reader-line-height);}',
-      'img{max-width:100%;height:auto}pre{overflow:auto;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--markdown-pre-bg)}code{font-family:"Cascadia Code","Consolas",monospace}table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}th,td{padding:7px 9px;border:1px solid var(--border)}blockquote{padding-left:14px;border-left:3px solid var(--markdown-quote-border);color:var(--markdown-quote-text)}',
-      '</style>',
-      '</head>',
-      '<body>',
-      `<article class="markdown-preview">${renderedHtml}</article>`,
-      '</body>',
-      '</html>'
-    ].join('');
+  function contextAction(action: string) {
+    const entry = contextMenu?.entry;
+    contextMenu = null;
+    if (!entry) return;
+    if (action === 'copy') void navigator.clipboard.writeText(entry.path).catch(desktop.error);
+    else if (action === 'reveal') void api.revealPath(entry.path).catch(desktop.error);
+    else if (action === 'new-file')
+      void desktop.newFile(entry.kind === 'directory' ? entry.path : parentPath(entry.path));
+    else if (action === 'new-folder')
+      void desktop.newFolder(entry.kind === 'directory' ? entry.path : parentPath(entry.path));
+    else if (action === 'refresh') void desktop.refreshDirectory(entry.path);
+    else if (action === 'rename' || action === 'move' || action === 'trash')
+      void desktop.mutate(entry, action);
   }
-
-  function escapeHtml(value: string) {
-    return value.replace(/[&<>"']/g, (char) => {
-      switch (char) {
-        case '&':
-          return '&amp;';
-        case '<':
-          return '&lt;';
-        case '>':
-          return '&gt;';
-        case '"':
-          return '&quot;';
-        default:
-          return '&#39;';
-      }
-    });
-  }
-
-  function switchLanguage() {
-    language = nextLanguage(language);
-    saveLanguage(language);
-    status = text[language].status.languageChanged;
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
+  function keydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      contextMenu = null;
+      quickOpen = false;
+      settingsOpen = false;
+      advancedOpen = false;
+      if (immersive) void toggleImmersive();
+      return;
+    }
     if (event.key === 'F11') {
       event.preventDefault();
-      void toggleImmersiveMode();
+      void toggleImmersive();
       return;
     }
-
-    if (event.key === 'Escape' && immersiveMode) {
+    if (!(event.ctrlKey || event.metaKey) || $prompt || quickOpen || settingsOpen || advancedOpen) return;
+    const key = event.key.toLowerCase();
+    if (key === 'n') {
       event.preventDefault();
-      void setImmersiveMode(false);
-      return;
-    }
-
-    if (event.key === 'Escape' && openToolbarMenu) {
+      desktop.createDocument();
+    } else if (key === 'o') {
       event.preventDefault();
-      closeToolbarMenu();
-      return;
-    }
-
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      void desktop.chooseFiles();
+    } else if (key === 'p') {
       event.preventDefault();
-      void saveCurrent();
+      quickOpen = true;
+    } else if (key === 's' && active) {
+      event.preventDefault();
+      void desktop.saveTab(active.id, event.shiftKey);
+    } else if (key === 'w' && active) {
+      event.preventDefault();
+      void desktop.closeTab(active.id);
+    } else if (key === 'tab' && active) {
+      event.preventDefault();
+      const tabs = $documents.tabs;
+      const index = tabs.findIndex((doc) => doc.id === active.id);
+      desktop.activate(tabs[(index + (event.shiftKey ? tabs.length - 1 : 1)) % tabs.length].id);
+    } else if (key === 'z' && active?.mode === 'visual') {
+      event.preventDefault();
+      documents.undoVisual(active.id, event.shiftKey);
+      desktop.scheduleDraft(active.id);
     }
+  }
+  function resizeStart(event: PointerEvent, side: 'left' | 'right') {
+    event.preventDefault();
+    drag = {
+      side,
+      start: event.clientX,
+      width: side === 'left' ? $preferences.leftWidth : $preferences.rightWidth
+    };
+  }
+  function resizeMove(event: PointerEvent) {
+    if (!drag) return;
+    const width = Math.max(
+      180,
+      Math.min(
+        drag.side === 'left' ? 460 : 400,
+        drag.width + (event.clientX - drag.start) * (drag.side === 'left' ? 1 : -1)
+      )
+    );
+    preferences.update((p) => ({ ...p, [drag!.side === 'left' ? 'leftWidth' : 'rightWidth']: width }));
+  }
+  function resizeEnd() {
+    if (drag) {
+      drag = null;
+      desktop.setPreferences($preferences);
+    }
+  }
+  function resizeKey(event: KeyboardEvent, side: 'left' | 'right') {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const field = side === 'left' ? 'leftWidth' : 'rightWidth';
+    desktop.setPreferences({
+      ...$preferences,
+      [field]: Math.max(180, Math.min(400, $preferences[field] + (event.key === 'ArrowRight' ? 16 : -16)))
+    });
   }
 
   onMount(() => {
-    let unlistenDragDrop: (() => void) | undefined;
-    let unlistenClose: (() => void) | undefined;
-    restoreAppearanceSettings();
+    applyTheme(selectedTheme);
+    setBackground(backgroundPath);
     if (!isTauri()) return;
-
-    void getCurrentWindow()
-      .onCloseRequested((event) => {
+    let destroyed = false;
+    const cleanup: (() => void)[] = [];
+    let changesTimer: ReturnType<typeof setTimeout>;
+    const changedPaths = new Set<string>();
+    const attach = (promise: Promise<() => void>) => {
+      void promise
+        .then((unlisten) => (destroyed ? unlisten() : cleanup.push(unlisten)))
+        .catch((error) => status.set(String(error)));
+    };
+    attach(
+      getCurrentWindow().onCloseRequested((event) => {
         event.preventDefault();
-        void requestAppClose();
+        void closeWindow();
       })
-      .then((unlisten) => {
-        unlistenClose = unlisten;
-      });
-
-    void getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (event.payload.type === 'enter' || event.payload.type === 'over') {
-          dropActive = true;
-          return;
-        }
-
-        dropActive = false;
+    );
+    attach(
+      getCurrentWebview().onDragDropEvent((event) => {
+        dropActive = event.payload.type === 'enter' || event.payload.type === 'over';
         if (event.payload.type === 'drop') {
-          void openDroppedPath(event.payload.paths);
+          const paths = event.payload.paths;
+          void (async () => {
+            for (const path of paths) await desktop.openPath(path);
+          })();
         }
       })
-      .then((unlisten) => {
-        unlistenDragDrop = unlisten;
-      });
-
-    void initialOpenPaths().then((paths) => {
-      const path = paths[0];
-      if (path) {
-        void loadPath(path);
-      }
-    });
-
+    );
+    attach(
+      listen<{ paths: string[] }>('workspace-changed', (event) => {
+        event.payload.paths.forEach((path) => changedPaths.add(path));
+        clearTimeout(changesTimer);
+        changesTimer = setTimeout(() => {
+          const paths = [...changedPaths];
+          changedPaths.clear();
+          void desktop.handleChanges(paths);
+        }, 300);
+      })
+    );
+    const focus = () => {
+      void desktop.refreshVisible();
+    };
+    window.addEventListener('focus', focus);
+    void (async () => {
+      for (const path of await api.initialOpenPaths()) await desktop.openPath(path);
+      await desktop.restoreUntitled();
+    })().catch(desktop.error);
     return () => {
-      unlistenDragDrop?.();
-      unlistenClose?.();
+      destroyed = true;
+      cleanup.forEach((fn) => fn());
+      window.removeEventListener('focus', focus);
+      clearTimeout(changesTimer);
+      clearTimeout(outlineTimer);
+      desktop.dispose();
     };
   });
 </script>
 
-<svelte:window on:click={handleWindowClick} on:keydown={handleKeydown} />
+<svelte:window
+  on:keydown={keydown}
+  on:pointermove={resizeMove}
+  on:pointerup={resizeEnd}
+  on:click={() => (contextMenu = null)}
+/>
 
-<main class="shell" class:drop-active={dropActive} class:immersive={immersiveMode} data-drop-text={t.dropText}>
-  <header class="toolbar" aria-hidden={immersiveMode}>
-    <div class="toolbar-group">
-      <div class="toolbar-menu">
-        <button
-          class="primary"
-          class:active={openToolbarMenu === 'open'}
-          disabled={busy}
-          aria-haspopup="menu"
-          aria-expanded={openToolbarMenu === 'open'}
-          on:click|stopPropagation={() => toggleToolbarMenu('open')}
-        >
-          <FolderOpen class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-          {t.actions.open}
-          <ChevronDown class="command-chevron" size={13} strokeWidth={1.8} aria-hidden="true" />
-        </button>
-        {#if openToolbarMenu === 'open'}
-          <div class="toolbar-menu-popover" role="menu" tabindex="-1" aria-label={t.actions.open}>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              on:click={() => {
-                closeToolbarMenu();
-                void chooseFile();
-              }}
-            >
-              <FileText class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-              {t.actions.openFile}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              on:click={() => {
-                closeToolbarMenu();
-                void chooseWorkspace();
-              }}
-            >
-              <Folder class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-              {t.actions.openFolder}
-            </button>
-          </div>
-        {/if}
-      </div>
-      <button
-        class="toolbar-icon-button"
-        class:dirty
-        disabled={!selectedPath || !dirty || busy}
-        title={t.actions.save}
-        aria-label={t.actions.save}
-        on:click={() => void saveCurrent()}
+<main
+  class="desktop-shell"
+  class:immersive
+  class:drop-active={dropActive}
+  style={`--nav-width:${$preferences.leftWidth}px;--outline-width:${$preferences.rightWidth}px`}
+>
+  <header class="desktop-toolbar">
+    <div class="desktop-brand"><BookOpen size={21} /><strong>{editionDisplayName}</strong></div>
+    <div class="desktop-actions">
+      <button title="新建 (Ctrl+N)" aria-label="新建" on:click={desktop.createDocument}
+        ><FilePlus2 size={17} /></button
       >
-        <Save class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-      </button>
-      <button
-        class="toolbar-icon-button"
-        disabled={!workspacePath || busy}
-        title={t.actions.refresh}
-        aria-label={t.actions.refresh}
-        on:click={refreshWorkspace}
+      <button title="打开文件 (Ctrl+O)" on:click={desktop.chooseFiles}
+        ><FolderOpen size={17} /><span>{t.actions.open}</span></button
       >
-        <RefreshCw class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-      </button>
+      <button
+        title="保存 (Ctrl+S)"
+        aria-label="保存"
+        disabled={!active || $saving.has(active.id)}
+        on:click={() => active && desktop.saveTab(active.id)}><Save size={17} /></button
+      >
+      <span class="toolbar-divider"></span>
+      <button class="quick-trigger" title="快速打开 (Ctrl+P)" on:click={() => (quickOpen = true)}
+        ><Search size={15} /><span>快速打开</span><kbd>Ctrl P</kbd></button
+      >
     </div>
-
-    <div class="toolbar-center">
-      <div class="segmented" aria-label={t.labels.viewMode}>
-        <button class:active={mode === 'read'} disabled={!selectedPath} on:click={() => void setMode('read')}>
-          <BookOpen class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-          {t.modes.read}
-        </button>
-        <button class:active={mode === 'edit'} disabled={!selectedPath} on:click={() => void setMode('edit')}>
-          <Code2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-          {t.modes.edit}
-        </button>
-        <button class:active={mode === 'visual'} disabled={!selectedPath} on:click={() => void setMode('visual')}>
-          <Pencil class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-          {t.modes.visual}
-        </button>
-        <button class:active={mode === 'split'} disabled={!selectedPath} on:click={() => void setMode('split')}>
-          <Columns2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-          {t.modes.split}
-        </button>
-      </div>
-    </div>
-
-    <div class="toolbar-end">
-      <div class="toolbar-menu">
-        <button
-          type="button"
-          class="toolbar-icon-button"
-          class:active={openToolbarMenu === 'appearance'}
-          title={t.labels.displayMenu}
-          aria-label={t.labels.displayMenu}
-          aria-haspopup="dialog"
-          aria-expanded={openToolbarMenu === 'appearance'}
-          on:click|stopPropagation={() => toggleToolbarMenu('appearance')}
-        >
-          <Palette class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-        </button>
-        {#if openToolbarMenu === 'appearance'}
-          <div class="toolbar-menu-popover appearance-menu" role="dialog" aria-label={t.labels.displayMenu}>
-            <label class="toolbar-menu-field">
-              <span>{t.actions.theme}</span>
-              <select value={selectedTheme.id} on:change={(event) => setTheme(event.currentTarget.value)}>
-                {#each themes as theme}
-                  <option value={theme.id}>{themeLabel(theme)} · {theme.mode === 'dark' ? t.labels.dark : t.labels.light}</option>
-                {/each}
-              </select>
-            </label>
-            <label class="toolbar-menu-check" title={t.labels.readingFocusTitle}>
-              <input
-                type="checkbox"
-                checked={readingFocusEnabled}
-                on:change={(event) => setReadingFocusEnabled(event.currentTarget.checked)}
-              />
-              <span>{t.labels.readingFocus}</span>
-            </label>
-            {#if backgroundImagePath}
-              <button
-                type="button"
-                class="active"
-                disabled={busy}
-                title={t.labels.clearBackground}
-                on:click={() => {
-                  closeToolbarMenu();
-                  clearBackgroundImage();
-                }}
-              >
-                <Trash2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-                {t.actions.clearImage}
-              </button>
-            {:else}
-              <button
-                type="button"
-                disabled={busy}
-                title={t.labels.chooseBackground}
-                on:click={() => {
-                  closeToolbarMenu();
-                  void chooseBackgroundImage();
-                }}
-              >
-                <ImageIcon class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-                {t.actions.chooseImage}
-              </button>
-            {/if}
-          </div>
-        {/if}
-      </div>
-      {#if hasSettingsPanel}
-        <button
-          type="button"
-          class="toolbar-icon-button"
-          class:active={settingsOpen}
-          title={settingsButtonTitle}
-          aria-label={settingsButtonLabel}
-          on:click={() => {
-            closeToolbarMenu();
-            settingsOpen = true;
-          }}
-        >
-          <Settings class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-        </button>
-      {/if}
-      <div class="toolbar-menu">
-        <button
-          type="button"
-          class="toolbar-icon-button"
-          class:active={openToolbarMenu === 'more'}
-          title={t.labels.moreMenu}
-          aria-label={t.labels.moreMenu}
-          aria-haspopup="dialog"
-          aria-expanded={openToolbarMenu === 'more'}
-          on:click|stopPropagation={() => toggleToolbarMenu('more')}
-        >
-          <Ellipsis class="button-icon" size={16} strokeWidth={1.8} aria-hidden="true" />
-        </button>
-        {#if openToolbarMenu === 'more'}
-          <div class="toolbar-menu-popover more-menu" role="dialog" aria-label={t.labels.moreMenu}>
-            <button
-              type="button"
-              disabled={busy || defaultSettingsBusy}
-              title={t.labels.defaultAppTitle}
-              on:click={() => {
-                closeToolbarMenu();
-                void openDefaultSettings();
-              }}
-            >
-              <Star class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-              {defaultSettingsBusy ? t.actions.setting : t.actions.setDefault}
-            </button>
-            <label class="toolbar-menu-check" title={t.labels.autoSaveTitle}>
-              <input
-                type="checkbox"
-                checked={askBeforeLeaveSave}
-                on:change={(event) => void setAskBeforeLeaveSave(event.currentTarget.checked)}
-              />
-              <span>{t.actions.autoSave}</span>
-            </label>
-            <button
-              type="button"
-              title={t.labels.immersiveMode}
-              on:click={() => {
-                closeToolbarMenu();
-                void toggleImmersiveMode();
-              }}
-            >
-              <Maximize2 class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-              {t.actions.immersive}
-            </button>
-            <button
-              type="button"
-              title={t.actions.toggleLanguage}
-              on:click={() => {
-                closeToolbarMenu();
-                switchLanguage();
-              }}
-            >
-              <Languages class="button-icon" size={15} strokeWidth={1.8} aria-hidden="true" />
-              {t.actions.languageButton}
-            </button>
-            {#if renderStatus}
-              <div class="toolbar-menu-info">
-                <span>{t.labels.renderEngine}</span>
-                <strong>{renderStatus}</strong>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+    <div class="desktop-utilities">
+      <button
+        class:active={!$preferences.leftClosed && Boolean($workspace.root)}
+        title="文件栏 / 打开文件夹"
+        aria-label="切换文件栏"
+        on:click={() =>
+          $workspace.root
+            ? desktop.setPreferences({ ...$preferences, leftClosed: !$preferences.leftClosed })
+            : desktop.chooseWorkspace()}><PanelLeft size={17} /></button
+      >
+      <button
+        class:active={!$preferences.rightClosed}
+        title="大纲"
+        aria-label="切换大纲"
+        on:click={() => desktop.setPreferences({ ...$preferences, rightClosed: !$preferences.rightClosed })}
+        ><PanelRight size={17} /></button
+      >
+      <button title="设置" aria-label="设置" on:click={openSettings}><Settings size={17} /></button>
     </div>
   </header>
-
-  <section class="workspace" style={workspaceStyle}>
-    <aside class="sidebar" class:collapsed={leftSidebarCollapsed}>
-      {#if leftSidebarCollapsed}
-        <button
-          class="rail-button"
-          title={t.panels.expandFolder}
-          aria-label={t.panels.expandFolder}
-          on:click={() => setLeftSidebarCollapsed(false)}
-        >
-          ☰
-        </button>
-      {:else}
-        <div class="panel-title">
-          <span>{t.panels.folder}</span>
-          <button
-            class="panel-icon-button"
-            title={t.panels.collapseFolder}
-            aria-label={t.panels.collapseFolder}
-            on:click={() => setLeftSidebarCollapsed(true)}
-          >
-            ‹
-          </button>
-        </div>
-        {#if rootNodes.length > 0}
-          <FileTree
-            nodes={rootNodes}
-            {selectedPath}
-            onSelectFile={selectFile}
-          />
-        {:else}
-          <p class="empty-note">{t.panels.noFolder}</p>
-        {/if}
-      {/if}
-    </aside>
-
-    <section class="content-pane" class:has-reader-bg={Boolean(backgroundImageUrl)} style={contentPaneStyle}>
-      {#if !selectedPath}
-        <div class="empty-state">
-          <h1>{appDisplayTitle}</h1>
-          <p>{t.panels.emptyState}</p>
-        </div>
-      {:else if mode === 'read'}
-        <MarkdownPreview
-          bind:this={previewRef}
-          {content}
-          {outline}
-          filePath={selectedPath}
-          preferences={previewPreferences}
-          fallbackRenderStatus={markdownStatus}
-          {readingFocusEnabled}
-          on:openLocalFile={(event) => selectFile(event.detail)}
-          on:renderStatus={(event) => setRenderStatus(event.detail)}
-          on:renderHtml={(event) => (renderedHtml = event.detail)}
-          on:linkStatus={(event) => (linkStatus = event.detail)}
-          on:activeLine={(event) => (activeOutlineLine = event.detail)}
-          on:readingProgress={(event) => setReadingProgress(event.detail)}
+  <DocumentTabs
+    tabs={$documents.tabs}
+    activeId={$documents.activeId}
+    onSelect={desktop.activate}
+    onClose={(id) => void desktop.closeTab(id)}
+    onCreate={desktop.createDocument}
+  />
+  <div class="desktop-workspace">
+    {#if !$preferences.leftClosed && !immersive && ($workspace.root || !active)}
+      <aside class="desktop-sidebar">
+        <FileBrowser
+          workspace={$workspace}
+          selectedPath={active?.path || ''}
+          onSelect={(entry) =>
+            entry.kind === 'directory'
+              ? void desktop.toggleDirectory(entry)
+              : void desktop.openFile(entry.path)}
+          onRefresh={() => void desktop.refreshVisible()}
+          onMenu={menu}
+          onNewFile={() => void desktop.newFile()}
+          onNewFolder={() => void desktop.newFolder()}
+          onChoose={() => void desktop.chooseWorkspace()}
         />
-      {:else if mode === 'edit'}
-        {#if MarkdownEditorComponent}
-          <svelte:component this={MarkdownEditorComponent} bind:this={editorRef} value={content} on:change={handleEditorChange} />
-        {:else}
-          <div class="empty-state">
-            <p>{t.status.loadingEditor}</p>
+      </aside>
+      <div
+        class="pane-resizer"
+        role="slider"
+        tabindex="0"
+        aria-label="调整文件栏宽度"
+        aria-valuemin="180"
+        aria-valuemax="460"
+        aria-valuenow={$preferences.leftWidth}
+        on:pointerdown={(event) => resizeStart(event, 'left')}
+        on:keydown={(event) => resizeKey(event, 'left')}
+      ></div>
+    {/if}
+    <section id="document-panel" class="desktop-document" role="tabpanel">
+      {#if active}
+        <div class="document-heading">
+          <div class="document-identity">
+            <strong>{filename(active.path)}</strong><small title={active.path}
+              >{active.path ? parentPath(active.path) : '尚未保存到文件'}</small
+            >
           </div>
-        {/if}
-      {:else if mode === 'visual'}
-        {#if VisualMarkdownEditorComponent}
-          <svelte:component
-            this={VisualMarkdownEditorComponent}
-            bind:this={visualRef}
-            value={content}
-            {outline}
-            filePath={selectedPath}
-            strings={t.visual}
-            on:change={handleEditorChange}
-          />
-        {:else}
-          <div class="empty-state">
-            <p>{t.status.loadingVisualEditor}</p>
+          <div class="document-modes" aria-label="视图模式">
+            <button
+              class:active={active.mode === 'read'}
+              title={t.modes.read}
+              on:click={() => setMode('read')}><BookOpen size={14} /><span>{t.modes.read}</span></button
+            >
+            <button
+              class:active={active.mode === 'edit'}
+              title={t.modes.edit}
+              on:click={() => setMode('edit')}><Code2 size={14} /><span>{t.modes.edit}</span></button
+            >
+            <button
+              class:active={active.mode === 'visual'}
+              title={t.modes.visual}
+              on:click={() => setMode('visual')}><Pencil size={14} /><span>{t.modes.visual}</span></button
+            >
+            <button
+              class:active={active.mode === 'split'}
+              title={t.modes.split}
+              on:click={() => setMode('split')}><Columns2 size={14} /><span>{t.modes.split}</span></button
+            >
           </div>
-        {/if}
+        </div>
+        {#if active.externalChanged}<div class="document-warning" role="status">
+            <span
+              >{active.missing
+                ? '原文件已删除或无法访问，编辑内容仍保留在此标签。'
+                : '文件已被其他程序修改，请处理当前编辑内容。'}</span
+            ><button on:click={() => active && desktop.reload(active.id)}>重新载入</button><button
+              on:click={() => active && desktop.saveTab(active.id, true)}>另存为</button
+            >
+          </div>{/if}
+        {#key active.id}
+          {@const docId = active.id}
+          <div
+            class="desktop-content"
+            class:has-reader-bg={Boolean(backgroundUrl)}
+            class:split={active.mode === 'split'}
+            style={paneStyle}
+          >
+            {#if active.mode === 'edit' || active.mode === 'split'}
+              {#if Editor}<svelte:component
+                  this={Editor}
+                  bind:this={editorRef}
+                  value={active.content}
+                  savedState={active.editorState}
+                  initialScroll={active.editorScroll}
+                  on:change={(event: CustomEvent<string>) => desktop.edit(docId, event.detail)}
+                  on:state={(event: CustomEvent<{ state: EditorState; scroll: number }>) =>
+                    documents.patch(docId, {
+                      editorState: event.detail.state,
+                      editorScroll: event.detail.scroll
+                    })}
+                />{:else}<div class="pane-loading">正在加载编辑器…</div>{/if}
+            {/if}
+            {#if active.mode === 'read' || active.mode === 'split'}
+              <MarkdownPreview
+                bind:this={previewRef}
+                content={active.content}
+                {outline}
+                filePath={active.path}
+                preferences={previewPreferences}
+                fallbackRenderStatus={markdownStatus}
+                {readingFocusEnabled}
+                initialScroll={active.previewScroll}
+                on:position={(event) => documents.patch(docId, { previewScroll: event.detail })}
+                on:openLocalFile={(event) =>
+                  selectSearch({
+                    path: event.detail.path,
+                    anchor: event.detail.anchor,
+                    label: '',
+                    detail: ''
+                  })}
+                on:renderHtml={(event) => acceptHtml(event.detail)}
+                on:readingProgress={(event) => (readingProgress = event.detail)}
+                on:activeLine={(event) => (activeLine = event.detail)}
+                on:linkStatus={(event) => (linkStatus = event.detail)}
+              />
+            {/if}
+            {#if active.mode === 'visual'}
+              {#if VisualEditor}<svelte:component
+                  this={VisualEditor}
+                  bind:this={visualRef}
+                  value={active.content}
+                  {outline}
+                  filePath={active.path}
+                  strings={t.visual}
+                  initialScroll={active.visualScroll}
+                  on:position={(event: CustomEvent<number>) =>
+                    documents.patch(docId, { visualScroll: event.detail })}
+                  on:change={(event: CustomEvent<string>) => desktop.edit(docId, event.detail, true)}
+                />{:else}<div class="pane-loading">正在加载可视化编辑器…</div>{/if}
+            {/if}
+          </div>
+        {/key}
       {:else}
-        <div class="split-view">
-          {#if MarkdownEditorComponent}
-            <svelte:component this={MarkdownEditorComponent} bind:this={editorRef} value={content} on:change={handleEditorChange} />
-          {:else}
-            <div class="empty-state">
-              <p>{t.status.loadingEditor}</p>
-            </div>
-          {/if}
-          <MarkdownPreview
-            bind:this={previewRef}
-            {content}
-            {outline}
-            filePath={selectedPath}
-            preferences={previewPreferences}
-            fallbackRenderStatus={markdownStatus}
-            {readingFocusEnabled}
-            on:openLocalFile={(event) => selectFile(event.detail)}
-            on:renderStatus={(event) => setRenderStatus(event.detail)}
-            on:renderHtml={(event) => (renderedHtml = event.detail)}
-            on:linkStatus={(event) => (linkStatus = event.detail)}
-            on:activeLine={(event) => (activeOutlineLine = event.detail)}
-            on:readingProgress={(event) => setReadingProgress(event.detail)}
-          />
+        <div class="desktop-welcome">
+          <div class="welcome-symbol"><BookOpen size={38} strokeWidth={1.3} /></div>
+          <p class="eyebrow">YOUR WORDS, YOUR SPACE</p>
+          <h1>打开文字，开始专注。</h1>
+          <p>阅读、整理和编辑本地 Markdown。<br />从一份文档开始，按需要打开文件夹。</p>
+          <div class="welcome-actions">
+            <button class="primary" on:click={desktop.chooseFiles}><FolderOpen size={17} />打开文件</button
+            ><button on:click={desktop.createDocument}><FilePlus2 size={17} />新建文档</button>
+          </div>
+          <button class="text-button" on:click={desktop.chooseWorkspace}>打开项目文件夹 →</button>
+          {#if $preferences.recent.length}<div class="recent-files">
+              <span>最近打开</span>{#each $preferences.recent.slice(0, 5) as path}<button
+                  title={path}
+                  on:click={() => desktop.openFile(path)}
+                  ><strong>{filename(path)}</strong><small>{parentPath(path)}</small></button
+                >{/each}
+            </div>{/if}
         </div>
       {/if}
     </section>
-
-    <aside class="outline" class:collapsed={rightSidebarCollapsed}>
-      {#if rightSidebarCollapsed}
-        <button
-          class="rail-button"
-          title={t.panels.expandOutline}
-          aria-label={t.panels.expandOutline}
-          on:click={() => setRightSidebarCollapsed(false)}
-        >
-          ≡
-        </button>
-      {:else}
-        <div class="panel-title">
-          <span>{t.panels.outline}</span>
-          <button
-            class="panel-icon-button"
-            title={t.panels.collapseOutline}
-            aria-label={t.panels.collapseOutline}
-            on:click={() => setRightSidebarCollapsed(true)}
+    {#if !$preferences.rightClosed && active && !immersive}
+      <div
+        class="pane-resizer"
+        role="slider"
+        tabindex="0"
+        aria-label="调整大纲宽度"
+        aria-valuemin="180"
+        aria-valuemax="400"
+        aria-valuenow={$preferences.rightWidth}
+        on:pointerdown={(event) => resizeStart(event, 'right')}
+        on:keydown={(event) => resizeKey(event, 'right')}
+      ></div>
+      <aside class="desktop-outline">
+        <div class="browser-heading">
+          <strong>{t.panels.outline}</strong><button
+            aria-label="收起大纲"
+            on:click={() => desktop.setPreferences({ ...$preferences, rightClosed: true })}
+            ><X size={14} /></button
           >
-            ›
-          </button>
         </div>
-        {#if hasWorkspaceHeadingIndex}
-          <div class="outline-tools">
-            <input type="search" placeholder="过滤标题" bind:value={headingSearch} />
-          </div>
-        {/if}
         <OutlinePanel
           headings={outline}
           strings={t.panels}
-          activeLine={activeOutlineLine}
-          filter={headingSearch}
-          on:jump={(event) => jumpToHeading(event.detail)}
+          {activeLine}
+          on:jump={(event) => headingJump(event.detail)}
         />
-        {#if hasWorkspaceHeadingIndex && headingSearch.trim() && workspaceHeadings.length > 0}
-          <div class="workspace-heading-results">
-            <div class="workspace-heading-title">工作区标题</div>
-            {#each workspaceHeadings.filter((heading) => heading.text.toLowerCase().includes(headingSearch.trim().toLowerCase())).slice(0, 24) as heading}
-              <button type="button" style={`--level: ${heading.level}`} on:click={() => selectFile(heading.path)}>
-                <span>{heading.text}</span>
-                <small>{heading.file_name}</small>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      {/if}
-    </aside>
-  </section>
-
-  <footer class="status-bar" aria-label={t.labels.statusBar} title={selectedPath}>
-    <div class="status-bar-context">
-      <span class:dot-dirty={dirty} class="dot"></span>
-      {#if encoding}
-        <span>{encoding}</span>
-      {/if}
-      {#if hasSettingsPanel && linkStatus.total > 0}
-        <span class:dirty={linkStatus.broken > 0}>{linkStatus.broken}/{linkStatus.total} 链接</span>
-      {/if}
-      {#if hasWorkspaceHeadingIndex && headingIndexBusy}
-        <span>索引中</span>
-      {/if}
-      {#if selectedPath && (mode === 'read' || mode === 'split')}
-        <span>{readingProgressLabel}</span>
-      {/if}
+      </aside>
+    {/if}
+  </div>
+  <footer class="status-bar desktop-status">
+    <span role="status">{$status}</span>
+    <div>
+      {#if active}<span>{dirty(active) ? '未保存' : '已保存'}</span><span
+          >{active.encoding}{active.bom ? ' BOM' : ''} · {active.newline.toUpperCase()}</span
+        >{#if active.mode === 'read' || active.mode === 'split'}<span>{readingProgress}%</span
+          >{/if}{#if linkStatus.broken}<span>{linkStatus.broken} 个失效链接</span>{/if}{/if}<span
+        >{appVersion}</span
+      >
     </div>
-    <span class="status-bar-message">{status}</span>
   </footer>
-
-  {#if immersiveMode}
-    <button class="immersive-exit" on:click={() => setImmersiveMode(false)}>{t.actions.exitImmersive}</button>
-  {/if}
-
-  {#if settingsPanelComponent}
-    <svelte:component
-      this={settingsPanelComponent}
-      open={settingsOpen}
-      preferences={previewPreferences}
-      onChange={setPreviewPreferences}
-      onClose={() => (settingsOpen = false)}
-      onReset={resetPreviewPreferences}
-      onExportHtml={exportCurrentHtml}
-      onPrint={printCurrentDocument}
-    />
-  {/if}
+  {#if immersive}<button class="immersive-exit" on:click={toggleImmersive}>退出沉浸 · F11</button>{/if}
 </main>
+
+{#if quickOpen}<QuickOpen
+    {localItems}
+    scannedItems={$search.items}
+    workspace={$workspace.root}
+    headingsEnabled={enableHeadingSearch}
+    busy={$search.busy}
+    status={$search.message}
+    scanned={$search.scanned}
+    skipped={$search.skipped}
+    errors={$search.errors}
+    incomplete={$search.incomplete}
+    onClose={() => (quickOpen = false)}
+    onSelect={(item) => void selectSearch(item)}
+    onScan={(kind) => void desktop.startSearch(kind)}
+    onCancel={desktop.cancelSearch}
+  />{/if}
+{#if $prompt}<TextPrompt title={$prompt.title} value={$prompt.value} onDone={desktop.resolvePrompt} />{/if}
+{#if contextMenu}
+  <div class="file-context-menu" role="menu" style={`left:${contextMenu.x}px;top:${contextMenu.y}px`}>
+    <button role="menuitem" on:click={() => contextAction('new-file')}>新建 Markdown</button><button
+      role="menuitem"
+      on:click={() => contextAction('new-folder')}>新建文件夹</button
+    >
+    <hr />
+    <button role="menuitem" on:click={() => contextAction('rename')}>重命名</button><button
+      role="menuitem"
+      on:click={() => contextAction('move')}>移动到…</button
+    ><button role="menuitem" on:click={() => contextAction('copy')}>复制路径</button><button
+      role="menuitem"
+      on:click={() => contextAction('reveal')}>在文件管理器中定位</button
+    >{#if contextMenu.entry.kind === 'directory'}<button
+        role="menuitem"
+        on:click={() => contextAction('refresh')}>刷新此目录</button
+      >{/if}
+    <hr />
+    <button role="menuitem" class="danger" on:click={() => contextAction('trash')}>移入回收站</button>
+  </div>
+{/if}
+{#if settingsOpen}
+  <div class="dialog-backdrop" role="presentation" on:click={() => (settingsOpen = false)}></div>
+  <div
+    class="shell-settings app-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="设置"
+    tabindex="-1"
+    use:modalFocus
+  >
+    <header>
+      <h2>设置</h2>
+      <button aria-label="关闭设置" on:click={() => (settingsOpen = false)}><X size={19} /></button>
+    </header>
+    <div class="settings-body">
+      <fieldset>
+        <legend>外观与阅读</legend><label
+          >主题<select value={selectedTheme.id} on:change={(event) => setTheme(event.currentTarget.value)}
+            >{#each themes as theme}<option value={theme.id}>{theme.name}</option>{/each}</select
+          ></label
+        ><label
+          >语言<select
+            value={language}
+            on:change={(event) => setLanguage(event.currentTarget.value as Language)}
+            ><option value="zh">简体中文</option><option value="en">English</option></select
+          ></label
+        ><label class="check-setting"
+          ><input
+            type="checkbox"
+            bind:checked={readingFocusEnabled}
+            on:change={() =>
+              localStorage.setItem('md-view-reading-focus-enabled', String(readingFocusEnabled))}
+          />高亮当前阅读段落</label
+        >
+        <div class="settings-buttons">
+          <button on:click={chooseBackground}>选择阅读背景</button>{#if backgroundPath}<button
+              on:click={clearBackground}>清除背景</button
+            >{/if}<button on:click={toggleImmersive}><Maximize2 size={14} />沉浸阅读</button>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>保存与恢复</legend>
+        <p>编辑内容自动保留为草稿；关闭未保存的文档时询问如何处理。</p>
+        <label class="check-setting"
+          ><input
+            type="checkbox"
+            checked={$preferences.autoWrite}
+            on:change={(event) =>
+              desktop.setPreferences({ ...$preferences, autoWrite: event.currentTarget.checked })}
+          />自动写回已保存过的原文件</label
+        >
+        <p class="muted">开启后停止输入约 1 秒自动写回；发现外部修改时暂停。</p>
+        {#if active}<button on:click={() => active && desktop.saveTab(active.id, true)}>另存为…</button>{/if}
+      </fieldset>
+      <fieldset>
+        <legend>文件夹与搜索</legend><label
+          >排除目录或模式（每行一条）<textarea
+            bind:value={excludesText}
+            rows="4"
+            placeholder="build&#10;**/.cache/**"
+          ></textarea></label
+        >
+        <p>同时遵循 .gitignore 与 .ignore。直接打开文件不受排除规则影响。</p>
+        <button on:click={applyExcludes}>应用并刷新目录</button>
+      </fieldset>
+      <fieldset>
+        <legend>更多</legend>
+        <div class="settings-buttons">
+          {#if settingsPanelComponent}<button
+              on:click={() => {
+                settingsOpen = false;
+                advancedOpen = true;
+              }}>Markdown 与排版</button
+            >{/if}<button on:click={() => api.openDefaultAppSettings().catch(desktop.error)}
+            >设为默认 Markdown 应用</button
+          >{#if exportHtmlFile}<button disabled={!renderedHtml} on:click={exportHtml}>导出 HTML</button
+            ><button disabled={!active} on:click={() => window.print()}>打印 / PDF</button>{/if}
+        </div>
+      </fieldset>
+    </div>
+  </div>
+{/if}
+{#if settingsPanelComponent}<svelte:component
+    this={settingsPanelComponent}
+    open={advancedOpen}
+    preferences={previewPreferences}
+    onChange={setPreviewPreferences}
+    onClose={() => (advancedOpen = false)}
+    onReset={() => setPreviewPreferences(defaultPreviewPreferences)}
+    onExportHtml={exportHtml}
+    onPrint={() => window.print()}
+  />{/if}

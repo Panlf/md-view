@@ -3,9 +3,10 @@ name: Pages
 on:
   push:
     branches:
-      - plus
       - main
-      - master
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -14,7 +15,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -27,24 +28,34 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build web Plus
+      - name: Check frontend and behavior
+        run: |
+          npm run check
+          npm test
+          npm run check:editions
+
+      - name: Build product site and online demo
         run: npm run build:web
         env:
           VITE_BASE_PATH: /md-view/
 
+      - name: Check Pages routes and assets
+        run: npm run check:web
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: dist-site
 
   deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-22.04
     environment:

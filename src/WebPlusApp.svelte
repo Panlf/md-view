@@ -4,6 +4,7 @@
   import PlusSettingsPanel from './components/PlusSettingsPanel.svelte';
   import { appVersion, editionDisplayName, plusMarkdownStatus } from './edition';
   import { extractHeadingsFromMarkdown } from './outline';
+  import { renderFullMarkdown } from './markdown/renderers/deferred';
   import { applyTheme, findTheme, THEME_STORAGE_KEY, themes } from './themes';
   import {
     defaultPlusPreferences,
@@ -60,18 +61,26 @@ flowchart LR
   let settingsOpen = false;
   let renderStatus = plusMarkdownStatus;
   let renderedHtml = '';
+  let renderedSource = content;
+  let exporting = false;
+  let exportError = '';
   let readingProgress = 0;
   let readingFocusEnabled = true;
   let selectedTheme: AppTheme = themes[0];
   let MarkdownEditorComponent: any = null;
   let editorLoadPromise: Promise<void> | null = null;
   let editorRef: any;
+  const productUrl = import.meta.env.BASE_URL.replace(/play\/$/, '');
 
   $: appTitle = appVersion ? `${editionDisplayName} ${appVersion}` : editionDisplayName;
   $: outline = extractHeadingsFromMarkdown(content);
   $: contentPaneStyle = plusReaderStyle(preferences);
   $: wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
   $: charCount = content.length;
+  $: if (content !== renderedSource) {
+    renderedSource = content;
+    renderedHtml = '';
+  }
 
   onMount(() => {
     preferences = loadPlusPreferences();
@@ -103,6 +112,7 @@ flowchart LR
 
   function updatePreferences(next: PlusPreferences) {
     preferences = next;
+    renderedHtml = '';
     savePlusPreferences(next);
   }
 
@@ -123,6 +133,7 @@ flowchart LR
     input.value = '';
     if (!file) return;
     content = await file.text();
+    if (file.size > 2 * 1024 * 1024) mode = 'source';
     fileName = file.name || 'document.md';
   }
 
@@ -130,30 +141,40 @@ flowchart LR
     downloadText(safeFileName(fileName, 'document.md'), content, 'text/markdown;charset=utf-8');
   }
 
-  function downloadHtml() {
+  async function downloadHtml() {
+    if (exporting) return;
+    exporting = true;
+    exportError = '';
     const title = fileName.replace(/\.(md|markdown)$/i, '') || 'md-view-plus';
-    const html = [
-      '<!doctype html>',
-      '<html lang="zh-CN">',
-      '<head>',
-      '<meta charset="UTF-8" />',
-      '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
-      `<title>${escapeHtml(title)}</title>`,
-      '<style>',
-      ':root{font-family:"Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;color:#1d2826;background:#fff}',
-      'body{margin:0;padding:32px}',
-      '.markdown-preview{max-width:920px;margin:0 auto;line-height:1.75}',
-      'pre{overflow:auto;padding:12px;background:#f6f9f8;border-radius:8px}',
-      'code{background:#edf3f1;padding:0.1em 0.3em;border-radius:4px}',
-      'img{max-width:100%}',
-      '</style>',
-      '</head>',
-      '<body>',
-      `<article class="markdown-preview">${renderedHtml}</article>`,
-      '</body>',
-      '</html>'
-    ].join('\n');
-    downloadText(`${title}.html`, html, 'text/html;charset=utf-8');
+    try {
+      const body = renderedHtml || (await renderFullMarkdown(content, outline, fileName, preferences)).html;
+      const html = [
+        '<!doctype html>',
+        '<html lang="zh-CN">',
+        '<head>',
+        '<meta charset="UTF-8" />',
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+        `<title>${escapeHtml(title)}</title>`,
+        '<style>',
+        ':root{font-family:"Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;color:#1d2826;background:#fff}',
+        'body{margin:0;padding:32px}',
+        '.markdown-preview{max-width:920px;margin:0 auto;line-height:1.75}',
+        'pre{overflow:auto;padding:12px;background:#f6f9f8;border-radius:8px}',
+        'code{background:#edf3f1;padding:0.1em 0.3em;border-radius:4px}',
+        'img{max-width:100%}',
+        '</style>',
+        '</head>',
+        '<body>',
+        `<article class="markdown-preview">${body}</article>`,
+        '</body>',
+        '</html>'
+      ].join('\n');
+      downloadText(`${title}.html`, html, 'text/html;charset=utf-8');
+    } catch (error) {
+      exportError = `导出失败：${String(error)}`;
+    } finally {
+      exporting = false;
+    }
   }
 
   function downloadText(name: string, text: string, type: string) {
@@ -190,10 +211,17 @@ flowchart LR
 </script>
 
 <main class="web-plus-shell">
+  <nav class="web-demo-navigation" aria-label="产品导航">
+    <a href={productUrl}>← md-view 产品介绍</a><span>浏览器体验 · 本地文件夹管理与草稿请使用桌面版</span><a
+      href="https://github.com/T-meow/md-view/releases/latest"
+      target="_blank"
+      rel="noopener noreferrer">下载桌面版 ↗</a
+    >
+  </nav>
   <header class="web-plus-toolbar">
     <div class="web-plus-brand">
       <strong>{appTitle}</strong>
-      <span>{renderStatus} · 阅读 {readingProgress}% · {charCount} 字符 · {wordCount} 词</span>
+      <span>文档在此浏览器内处理 · 阅读 {readingProgress}% · {charCount} 字符</span>
     </div>
 
     <div class="web-plus-controls">
@@ -202,7 +230,10 @@ flowchart LR
         <input type="file" accept=".md,.markdown,text/markdown,text/plain" on:change={importMarkdown} />
       </label>
       <button type="button" on:click={downloadMarkdown}>下载 MD</button>
-      <button type="button" on:click={downloadHtml}>下载 HTML</button>
+      <button type="button" disabled={exporting} on:click={downloadHtml}
+        >{exporting ? '正在导出…' : '下载 HTML'}</button
+      >
+      {#if exportError}<span role="alert">{exportError}</span>{/if}
       <button type="button" on:click={() => window.print()}>打印/PDF</button>
       <button type="button" on:click={() => (settingsOpen = true)}>Plus</button>
       <label class="web-plus-check">
@@ -213,7 +244,11 @@ flowchart LR
         />
         <span>高亮</span>
       </label>
-      <select value={selectedTheme.name} on:change={(event) => updateTheme(event.currentTarget.value)} aria-label="主题">
+      <select
+        value={selectedTheme.name}
+        on:change={(event) => updateTheme(event.currentTarget.value)}
+        aria-label="主题"
+      >
         {#each themes as theme}
           <option value={theme.name}>{theme.name}</option>
         {/each}
@@ -227,12 +262,22 @@ flowchart LR
     </div>
   </header>
 
-  <section class:source-view={mode === 'source'} class:read-view={mode === 'read'} class:split-view={mode === 'split'} class="web-plus-workspace">
+  <section
+    class:source-view={mode === 'source'}
+    class:read-view={mode === 'read'}
+    class:split-view={mode === 'split'}
+    class="web-plus-workspace"
+  >
     {#if mode !== 'read'}
       <section class="web-plus-editor-panel">
         <input class="web-plus-title" bind:value={fileName} aria-label="文件名" />
         {#if MarkdownEditorComponent}
-          <svelte:component this={MarkdownEditorComponent} bind:this={editorRef} bind:value={content} />
+          <svelte:component
+            this={MarkdownEditorComponent}
+            bind:this={editorRef}
+            value={content}
+            on:change={(event: CustomEvent<string>) => (content = event.detail)}
+          />
         {:else}
           <div class="empty-state">
             <p>正在加载编辑器</p>
@@ -246,7 +291,7 @@ flowchart LR
         <MarkdownPreview
           {content}
           {outline}
-          preferences={preferences}
+          {preferences}
           filePath={fileName}
           fallbackRenderStatus={plusMarkdownStatus}
           {readingFocusEnabled}
