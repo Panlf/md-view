@@ -116,7 +116,7 @@ export function postProcessMarkdownHtml(
       ...extraAllowedAttrs
     ],
     ADD_URI_SAFE_ATTR: ['src'],
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data|blob|asset):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data|blob|asset):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
   });
 }
 

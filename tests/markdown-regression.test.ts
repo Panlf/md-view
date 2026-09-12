@@ -3,6 +3,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { renderPlusMarkdown } from '../src/markdown/renderers/plus';
 import { renderFastMarkdown } from '../src/markdown/renderers/fast';
+import { postProcessMarkdownHtml } from '../src/markdown/renderers/shared';
 import { extractHeadingsFromMarkdown } from '../src/outline';
 import { defaultPlusPreferences } from '../src/plusPreferences';
 import { createDocuments } from '../src/state/documents';
@@ -50,6 +51,79 @@ describe('existing Markdown sample', () => {
     expect(html.querySelector('[data-local-file]')?.getAttribute('data-source-href')).toBe(
       './other.md#intro'
     );
+  });
+});
+
+describe('Mermaid rendering regression', () => {
+  it('retains Chinese node labels, loop connections and arrow geometry after sanitization', async () => {
+    const labels = [
+      '白天经营特调事务所',
+      '获得信用点、情报碎片、行动整备存量',
+      '研发菜品、安排店员、配装武器、购买弹药补给',
+      '夜晚 TPS 委托行动（越肩视角手动射击）',
+      '完成目标、击败精英、选择撤离或贪资源',
+      '获得幽灵币、稀有食材、新配方与武器改装件',
+      '升级菜单、改装武器和事务所功能',
+      '购买弹药补给与基础装备',
+      '解锁高级行动落点与战斗构筑'
+    ];
+    const source = [
+      '```mermaid',
+      'flowchart TD',
+      ...labels.map((label, index) => `${String.fromCharCode(65 + index)}["${label}"]`),
+      'A --> B --> C --> D --> E --> F --> G --> A',
+      'B -.-> H',
+      'F -.-> I',
+      'H --> D',
+      'I --> C',
+      '```'
+    ].join('\n');
+    const rendered = await renderPlusMarkdown(source, { headings: [], markdownPath: '/docs/loop.md' });
+    const html = document.createElement('div');
+    html.innerHTML = rendered.html;
+    expect(html.querySelector('.markdown-mermaid-error')).toBeNull();
+    const svg = html.querySelector('.markdown-mermaid svg');
+    expect(svg).not.toBeNull();
+    const nodeLabels = Array.from(svg!.querySelectorAll('.node .label')).map((node) =>
+      node.textContent?.replace(/\s/g, '')
+    );
+    expect(nodeLabels).toEqual(labels.map((label) => label.replace(/\s/g, '')));
+    const connections = Array.from(svg!.querySelectorAll('path.flowchart-link'));
+    expect(connections).toHaveLength(11);
+    for (const path of connections) {
+      expect(path.getAttribute('d')).toMatch(/^M/);
+      const arrow = path.getAttribute('marker-end')?.match(/#([^)]+)\)/)?.[1];
+      expect(arrow).toBeTruthy();
+      expect(svg!.querySelector(`[id="${arrow}"] path`)?.getAttribute('d')).toMatch(/^M/);
+    }
+  }, 30000);
+
+  it('preserves SVG paths and relative links while removing executable markup', () => {
+    const paths = ['M0,0 L10,10 Z', 'M 0 0 L 10 5 L 0 10 z', 'M-0.5,.5 C1,2 3,4 5,6'];
+    const rendered = postProcessMarkdownHtml(
+      [
+        '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)">',
+        ...paths.map((path) => `<path d="${path}" onmouseover="alert(1)"></path>`),
+        '<script>alert(1)</script>',
+        '<foreignObject><div>untrusted HTML</div></foreignObject>',
+        '</svg>',
+        '<a href="notes2.pdf">relative</a>',
+        '<a href="https://example.com/notes2.pdf">external</a>',
+        '<a href="javascript:alert(1)">blocked</a>',
+        '<a href="java&#x09;script:alert(1)">obfuscated</a>'
+      ].join(''),
+      { headings: [], markdownPath: '/docs/sample.md' }
+    );
+    const html = document.createElement('div');
+    html.innerHTML = rendered;
+    expect(Array.from(html.querySelectorAll('path')).map((path) => path.getAttribute('d'))).toEqual(paths);
+    expect(html.querySelector('script, foreignObject, [onload], [onmouseover]')).toBeNull();
+    expect(Array.from(html.querySelectorAll('a')).map((link) => link.getAttribute('href'))).toEqual([
+      'notes2.pdf',
+      'https://example.com/notes2.pdf',
+      null,
+      null
+    ]);
   });
 });
 
