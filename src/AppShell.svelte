@@ -60,6 +60,7 @@
 
   let workspacePath = '';
   let tree: FileNode | null = null;
+  let expandedDirs = new Set<string>();
   let selectedPath = '';
   let content = '';
   let savedContent = '';
@@ -202,6 +203,10 @@
   }
 
   function applyWorkspace(nextTree: FileNode, nextPath: string, resetFile: boolean) {
+    // 换工作区时旧的展开路径已无意义，回到默认全折叠。
+    if (nextPath !== workspacePath) {
+      expandedDirs = new Set<string>();
+    }
     tree = nextTree;
     workspacePath = nextPath;
     localStorage.setItem(LAST_WORKSPACE_STORAGE_KEY, nextPath);
@@ -238,6 +243,34 @@
     readingProgress = 0;
     dirty = false;
     modifiedAt = null;
+  }
+
+  function toggleDirectory(path: string) {
+    const next = new Set(expandedDirs);
+    if (!next.delete(path)) {
+      next.add(path);
+    }
+    expandedDirs = next;
+  }
+
+  function findAncestorDirs(node: FileNode, path: string): string[] | null {
+    if (node.path === path) return [];
+    for (const child of node.children) {
+      const sub = findAncestorDirs(child, path);
+      if (sub) {
+        return child.kind === 'directory' ? [child.path, ...sub] : sub;
+      }
+    }
+    return null;
+  }
+
+  // 从搜索结果、本地链接等树外入口打开文件时，展开其所在目录链让选中项可见。
+  function revealInTree(path: string) {
+    if (!tree) return;
+    const ancestors = findAncestorDirs(tree, path);
+    if (!ancestors || ancestors.length === 0) return;
+    if (ancestors.every((dir) => expandedDirs.has(dir))) return;
+    expandedDirs = new Set([...expandedDirs, ...ancestors]);
   }
 
   async function refreshWorkspace() {
@@ -314,6 +347,7 @@
     readingProgress = 0;
     renderedHtml = '';
     linkStatus = { broken: 0, total: 0 };
+    revealInTree(result.path);
 
     const draft = askBeforeLeaveSave ? await readDraft(result.path) : null;
     if (draft && draft.content !== result.content) {
@@ -1108,7 +1142,9 @@
           <FileTree
             nodes={rootNodes}
             {selectedPath}
+            expandedPaths={expandedDirs}
             onSelectFile={selectFile}
+            onToggleDirectory={toggleDirectory}
           />
         {:else}
           <p class="empty-note">{t.panels.noFolder}</p>

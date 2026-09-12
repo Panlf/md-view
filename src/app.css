@@ -620,12 +620,7 @@ button:disabled {
 }
 
 .file-tree button.directory {
-  cursor: default;
-}
-
-.file-tree button.directory:hover {
-  border-color: transparent;
-  background: transparent;
+  cursor: pointer;
 }
 
 .file-tree button.selected {
@@ -636,6 +631,12 @@ button:disabled {
 
 .file-tree .twist {
   color: var(--panel-muted);
+  display: inline-block;
+  transition: transform 0.12s ease;
+}
+
+.file-tree .twist.expanded {
+  transform: rotate(90deg);
 }
 
 .file-tree .label {
