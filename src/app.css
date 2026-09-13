@@ -620,12 +620,7 @@ button:disabled {
 }
 
 .file-tree button.directory {
-  cursor: default;
-}
-
-.file-tree button.directory:hover {
-  border-color: transparent;
-  background: transparent;
+  cursor: pointer;
 }
 
 .file-tree button.selected {
@@ -636,6 +631,12 @@ button:disabled {
 
 .file-tree .twist {
   color: var(--panel-muted);
+  display: inline-block;
+  transition: transform 0.12s ease;
+}
+
+.file-tree .twist.expanded {
+  transform: rotate(90deg);
 }
 
 .file-tree .label {
@@ -914,6 +915,34 @@ button:disabled {
   border-radius: 6px;
   background: color-mix(in srgb, var(--selected-bg) 62%, transparent);
   box-shadow: -5px 0 0 -2px color-mix(in srgb, var(--primary) 78%, transparent);
+}
+
+/*
+ * 阅读指示条贴在块的左边缘，而段落/标题默认没有左内边距，文字会紧挨指示条。
+ * 给这些块统一加 10px 左内边距留出间隙；所有块同步偏移，指示条切换时文字不跳动。
+ * 列表/引用/代码块自带缩进，无需处理；打印时归零，不影响导出排版。
+ */
+.markdown-preview.reading-focus-enabled {
+  --reading-focus-indent: 10px;
+}
+
+.markdown-preview.reading-focus-enabled > h1,
+.markdown-preview.reading-focus-enabled > h2,
+.markdown-preview.reading-focus-enabled > h3,
+.markdown-preview.reading-focus-enabled > h4,
+.markdown-preview.reading-focus-enabled > h5,
+.markdown-preview.reading-focus-enabled > h6,
+.markdown-preview.reading-focus-enabled > p,
+.markdown-preview.reading-focus-enabled > dl,
+.markdown-preview.reading-focus-enabled > details,
+.markdown-preview.reading-focus-enabled > figure,
+.markdown-preview.reading-focus-enabled > table,
+.markdown-preview.reading-focus-enabled > nav,
+.markdown-preview.reading-focus-enabled > section,
+.markdown-preview.reading-focus-enabled > .markdown-mermaid,
+.markdown-preview.reading-focus-enabled > .markdown-properties,
+.markdown-preview.reading-focus-enabled > .markdown-frontmatter {
+  padding-left: var(--reading-focus-indent, 0px);
 }
 
 .markdown-preview ul,
@@ -1692,6 +1721,10 @@ button:disabled {
     height: auto;
     overflow: visible;
     padding: 0;
+  }
+
+  .markdown-preview.reading-focus-enabled {
+    --reading-focus-indent: 0px;
   }
 
   .web-plus-shell,

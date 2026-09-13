@@ -842,12 +842,20 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn scan_directory(path: &Path) -> AppResult<FileNode> {
-    let metadata = fs::metadata(path).map_err(to_error)?;
-    let mut children = Vec::new();
+/// 递归扫描的最大深度，防御异常深的目录树（循环软链接已在遍历中跳过）。
+const MAX_SCAN_DEPTH: usize = 32;
 
-    for entry in fs::read_dir(path).map_err(to_error)? {
-        let entry = entry.map_err(to_error)?;
+fn scan_directory(path: &Path) -> AppResult<FileNode> {
+    scan_directory_at(path, 0)
+}
+
+fn scan_directory_at(path: &Path, depth: usize) -> AppResult<FileNode> {
+    let metadata = fs::metadata(path).map_err(to_error)?;
+    let mut directories: Vec<FileNode> = Vec::new();
+    let mut files: Vec<FileNode> = Vec::new();
+
+    // 逐项容错：单个条目或子目录不可读时跳过，不让整个工作区扫描失败。
+    for entry in fs::read_dir(path).map_err(to_error)?.flatten() {
         let child_path = entry.path();
         let file_name = entry.file_name().to_string_lossy().to_string();
 
@@ -855,26 +863,41 @@ fn scan_directory(path: &Path) -> AppResult<FileNode> {
             continue;
         }
 
-        if child_path.is_file() && is_browsable_text_path(&child_path) {
-            let child_metadata = fs::metadata(&child_path).map_err(to_error)?;
-            children.push(FileNode {
+        // DirEntry 自带的类型/元数据在 Windows 上来自目录枚举缓存，避免每个条目再 stat 一次。
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        // 跳过符号链接/联接点，避免链接成环导致扫描失控。
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        if file_type.is_dir() {
+            if depth >= MAX_SCAN_DEPTH {
+                continue;
+            }
+            if let Ok(child) = scan_directory_at(&child_path, depth + 1) {
+                // 剪枝：递归后不含任何可浏览文件的目录不展示。
+                if !child.children.is_empty() {
+                    directories.push(child);
+                }
+            }
+        } else if file_type.is_file() && is_browsable_text_path(&child_path) {
+            let child_metadata = entry.metadata().ok();
+            files.push(FileNode {
                 path: normalize_path(&child_path),
                 name: file_name,
                 kind: "file".into(),
                 children: Vec::new(),
-                size: child_metadata.len(),
-                modified_at: system_time_to_ms(child_metadata.modified().ok()),
+                size: child_metadata.as_ref().map(|value| value.len()).unwrap_or(0),
+                modified_at: system_time_to_ms(child_metadata.and_then(|value| value.modified().ok())),
             });
         }
     }
 
-    children.sort_by(|left, right| {
-        let left_rank = if left.kind == "directory" { 0 } else { 1 };
-        let right_rank = if right.kind == "directory" { 0 } else { 1 };
-        left_rank
-            .cmp(&right_rank)
-            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-    });
+    directories.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    files.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    directories.extend(files);
 
     Ok(FileNode {
         path: normalize_path(path),
@@ -883,7 +906,7 @@ fn scan_directory(path: &Path) -> AppResult<FileNode> {
             .map(|value| value.to_string_lossy().to_string())
             .unwrap_or_else(|| normalize_path(path)),
         kind: "directory".into(),
-        children,
+        children: directories,
         size: metadata.len(),
         modified_at: system_time_to_ms(metadata.modified().ok()),
     })
@@ -1086,5 +1109,76 @@ mod tests {
         let (content, encoding) = decode_text(&[0xEF, 0xBB, 0xBF, b'a', b'b']).unwrap();
         assert_eq!(content, "ab");
         assert_eq!(encoding, "UTF-8 BOM");
+    }
+
+    struct TempWorkspace(PathBuf);
+
+    impl Drop for TempWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn temp_workspace(tag: &str) -> TempWorkspace {
+        let root = std::env::temp_dir().join(format!(
+            "md-view-scan-test-{}-{}",
+            tag,
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        TempWorkspace(root)
+    }
+
+    fn find_child<'a>(node: &'a FileNode, name: &str) -> Option<&'a FileNode> {
+        node.children.iter().find(|child| child.name == name)
+    }
+
+    #[test]
+    fn scan_directory_recurses_into_subdirectories() {
+        let workspace = temp_workspace("recurse");
+        let root = &workspace.0;
+        fs::write(root.join("top.md"), "# top").unwrap();
+        fs::create_dir_all(root.join("nested/deeper")).unwrap();
+        fs::write(root.join("nested/mid.md"), "# mid").unwrap();
+        fs::write(root.join("nested/deeper/leaf.markdown"), "# leaf").unwrap();
+        fs::write(root.join("nested/deeper/ignored.txt.bak"), "skip").unwrap();
+
+        let tree = scan_directory(root).unwrap();
+        assert_eq!(tree.children.len(), 2);
+        assert_eq!(tree.children[0].kind, "directory");
+
+        let nested = find_child(&tree, "nested").unwrap();
+        let deeper = find_child(nested, "deeper").unwrap();
+        assert!(find_child(&tree, "top.md").is_some());
+        assert!(find_child(nested, "mid.md").is_some());
+        assert!(find_child(deeper, "leaf.markdown").is_some());
+        assert!(find_child(deeper, "ignored.txt.bak").is_none());
+    }
+
+    #[test]
+    fn scan_directory_prunes_directories_without_browsable_files() {
+        let workspace = temp_workspace("prune");
+        let root = &workspace.0;
+        fs::write(root.join("note.md"), "# note").unwrap();
+        fs::create_dir_all(root.join("empty-chain/very-deep")).unwrap();
+        fs::write(root.join("empty-chain/very-deep/image.png"), "binary").unwrap();
+
+        let tree = scan_directory(root).unwrap();
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].name, "note.md");
+    }
+
+    #[test]
+    fn scan_directory_skips_ignored_directory_names() {
+        let workspace = temp_workspace("skip");
+        let root = &workspace.0;
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::write(root.join("node_modules/pkg/readme.md"), "# pkg").unwrap();
+        fs::write(root.join("keep.md"), "# keep").unwrap();
+
+        let tree = scan_directory(root).unwrap();
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].name, "keep.md");
     }
 }
