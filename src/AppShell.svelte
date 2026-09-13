@@ -10,6 +10,7 @@
     FilePlus2,
     FolderOpen,
     Save,
+    Search,
     Settings,
     PanelLeft,
     PanelRight,
@@ -71,6 +72,7 @@
   let contextMenu: { entry: DirectoryEntry; x: number; y: number } | null = null;
   let openMenuOpen = false;
   let appearanceOpen = false;
+  let aboutOpen = false;
   let Editor: any = null;
   let VisualEditor: any = null;
   let editorPromise: Promise<void> | null = null;
@@ -335,6 +337,7 @@
       contextMenu = null;
       openMenuOpen = false;
       appearanceOpen = false;
+      aboutOpen = false;
       quickOpen = false;
       settingsOpen = false;
       advancedOpen = false;
@@ -542,6 +545,10 @@
         aria-label="刷新目录"
         disabled={!$workspace.root}
         on:click={() => void desktop.refreshVisible()}><RefreshCw size={17} /></button
+      >
+      <span class="toolbar-divider"></span>
+      <button class="quick-trigger" title="快速打开 (Ctrl+P)" on:click={() => (quickOpen = true)}
+        ><Search size={15} /><span>快速打开</span><kbd>Ctrl P</kbd></button
       >
     </div>
     <div class="document-modes toolbar-modes" aria-label="视图模式">
@@ -797,13 +804,58 @@
       {#if active}<span>{dirty(active) ? '未保存' : '已保存'}</span><span
           >{active.encoding}{active.bom ? ' BOM' : ''} · {active.newline.toUpperCase()}</span
         >{#if active.mode === 'read' || active.mode === 'split'}<span>{readingProgress}%</span
-          >{/if}{#if linkStatus.broken}<span>{linkStatus.broken} 个失效链接</span>{/if}{/if}<span
-        >{appVersion}</span
+          >{/if}{#if linkStatus.broken}<span>{linkStatus.broken} 个失效链接</span>{/if}{/if}<button
+        class="version-button"
+        title="关于与快捷键"
+        on:click={() => (aboutOpen = true)}>{editionDisplayName} {appVersion}</button
       >
     </div>
   </footer>
   {#if immersive}<button class="immersive-exit" on:click={toggleImmersive}>退出沉浸 · F11</button>{/if}
 </main>
+
+{#if aboutOpen}
+  <div class="dialog-backdrop" role="presentation" on:click={() => (aboutOpen = false)}></div>
+  <div
+    class="about-dialog app-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="关于与快捷键"
+    tabindex="-1"
+    use:modalFocus
+  >
+    <header>
+      <div class="about-brand">
+        <BookOpen size={24} />
+        <div>
+          <strong>{editionDisplayName}</strong>
+          <small>版本 {appVersion} · 本地 Markdown 阅读、整理与编辑</small>
+        </div>
+      </div>
+      <button class="about-close" aria-label="关闭" on:click={() => (aboutOpen = false)}><X size={15} /></button>
+    </header>
+    <h3>键盘快捷键</h3>
+    <div class="shortcut-grid">
+      <div class="shortcut-row"><span>新建文档</span><span class="keys"><kbd>Ctrl</kbd><kbd>N</kbd></span></div>
+      <div class="shortcut-row"><span>打开文件</span><span class="keys"><kbd>Ctrl</kbd><kbd>O</kbd></span></div>
+      <div class="shortcut-row"><span>快速打开 / 搜索</span><span class="keys"><kbd>Ctrl</kbd><kbd>P</kbd></span></div>
+      <div class="shortcut-row"><span>保存</span><span class="keys"><kbd>Ctrl</kbd><kbd>S</kbd></span></div>
+      <div class="shortcut-row"><span>另存为</span><span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd></span></div>
+      <div class="shortcut-row"><span>关闭标签页</span><span class="keys"><kbd>Ctrl</kbd><kbd>W</kbd></span></div>
+      <div class="shortcut-row"><span>切换标签页</span><span class="keys"><kbd>Ctrl</kbd><kbd>Tab</kbd></span></div>
+      <div class="shortcut-row"><span>直观编辑撤销 / 重做</span><span class="keys"><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
+      <div class="shortcut-row"><span>沉浸模式</span><span class="keys"><kbd>F11</kbd></span></div>
+      <div class="shortcut-row"><span>关闭弹层 / 退出沉浸</span><span class="keys"><kbd>Esc</kbd></span></div>
+      <div class="shortcut-row"><span>搜索结果导航</span><span class="keys"><kbd>↑</kbd><kbd>↓</kbd><kbd>Enter</kbd></span></div>
+    </div>
+    <h3>效率技巧</h3>
+    <ul class="about-tips">
+      <li>右键文件或文件夹：新建、重命名、移动、复制路径、回收站</li>
+      <li>按住文件拖到目标文件夹上即可移动；拖到顶部工作区名回到根目录</li>
+      <li>快速打开支持按文件名与标题过滤，回车直接打开选中项</li>
+    </ul>
+  </div>
+{/if}
 
 {#if quickOpen}<QuickOpen
     {localItems}
