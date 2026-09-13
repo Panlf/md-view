@@ -157,8 +157,16 @@
 
   export function scrollToLine(line: number) {
     const target = previewHost?.querySelector(`[data-outline-line="${line}"]`);
-    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    scrollTargetToTop(target);
     scheduleReadingPositionUpdate();
+  }
+
+  // 跳转定位到视口顶部而非居中：高亮阅读线在视口 25% 处，若标题落在中间，
+  // 阅读线仍指向上一小节，高亮会立刻回跳（表现为“点哪个选上一个”）。
+  function scrollTargetToTop(target: Element | null | undefined) {
+    if (!target || !previewHost) return;
+    const offset = target.getBoundingClientRect().top - previewHost.getBoundingClientRect().top;
+    previewHost.scrollTo({ top: previewHost.scrollTop + offset - 10, behavior: 'smooth' });
   }
 
   function handleClick(event: MouseEvent) {
@@ -225,7 +233,8 @@
       /* Use the literal anchor. */
     }
     const target = previewHost?.querySelector(`#${CSS.escape(anchor)}, [name="${CSS.escape(anchor)}"]`);
-    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    scrollTargetToTop(target);
+    scheduleReadingPositionUpdate();
   }
 
   function scheduleReadingPositionUpdate() {

@@ -87,9 +87,27 @@ export function postProcessMarkdownHtml(
   const renderedHeadings = template.content.querySelectorAll('h1,h2,h3,h4,h5,h6');
   const usedIds = new Set(context.headings.map((heading) => heading.anchor));
   const slugCounts = new Map<string, number>();
-  renderedHeadings.forEach((node, index) => {
-    const heading = context.headings[index];
-    if (!heading) return;
+  // 按标题文本顺序匹配源标题，而非按下标对齐：引用块/Setext 等场景下
+  // 渲染出的 h 标签数量可能与提取列表不一致，下标对齐会让行号整体错位，
+  // 导致大纲点击跳转/高亮落到上一个标题。
+  const sourceHeadings = context.headings.map((heading, index) => ({
+    heading,
+    index,
+    key: normalizeHeadingText(heading.text)
+  }));
+  let headingCursor = 0;
+  renderedHeadings.forEach((node) => {
+    const key = normalizeHeadingText(node.textContent ?? '');
+    let matched = -1;
+    for (let i = headingCursor; i < sourceHeadings.length; i += 1) {
+      if (sourceHeadings[i].key === key) {
+        matched = i;
+        break;
+      }
+    }
+    if (matched === -1) return;
+    const { heading, index } = sourceHeadings[matched];
+    headingCursor = matched + 1;
     node.setAttribute('id', stableHeadingId(heading, index));
     node.setAttribute('data-outline-line', String(heading.line));
     const base = slugHeading(heading.text, index).replace(/^heading-/, '');
@@ -126,6 +144,14 @@ function stableHeadingId(heading: Heading, index: number) {
 
 function isExternalHref(href: string) {
   return /^(?:https?:|mailto:|tel:)/i.test(href);
+}
+
+function normalizeHeadingText(text: string) {
+  return text
+    .replace(/[*_~`]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 function slugHeading(text: string, index: number) {

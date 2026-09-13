@@ -21,7 +21,9 @@
     FileText,
     Folder,
     RefreshCw,
-    ChevronDown
+    ChevronDown,
+    Palette,
+    Image as ImageIcon
   } from 'lucide-svelte';
   import DocumentTabs from './components/DocumentTabs.svelte';
   import FileBrowser from './components/FileBrowser.svelte';
@@ -68,6 +70,7 @@
   let dropActive = false;
   let contextMenu: { entry: DirectoryEntry; x: number; y: number } | null = null;
   let openMenuOpen = false;
+  let appearanceOpen = false;
   let Editor: any = null;
   let VisualEditor: any = null;
   let editorPromise: Promise<void> | null = null;
@@ -316,6 +319,7 @@
     if (event.key === 'Escape') {
       contextMenu = null;
       openMenuOpen = false;
+      appearanceOpen = false;
       quickOpen = false;
       settingsOpen = false;
       advancedOpen = false;
@@ -468,6 +472,7 @@
   on:click={() => {
     contextMenu = null;
     openMenuOpen = false;
+    appearanceOpen = false;
   }}
 />
 
@@ -551,6 +556,43 @@
       >
     </div>
     <div class="toolbar-side toolbar-right">
+      <div class="toolbar-menu">
+        <button
+          class:active={appearanceOpen}
+          title="主题与背景"
+          aria-label="主题与背景"
+          aria-haspopup="dialog"
+          aria-expanded={appearanceOpen}
+          on:click|stopPropagation={() => (appearanceOpen = !appearanceOpen)}
+        >
+          <Palette size={17} />
+        </button>
+        {#if appearanceOpen}
+          <div
+            class="toolbar-popover appearance-popover"
+            role="dialog"
+            aria-label="主题与背景"
+            tabindex="-1"
+            on:click|stopPropagation
+            on:keydown|stopPropagation
+          >
+            <label class="appearance-field">
+              <span>主题</span>
+              <select value={selectedTheme.id} on:change={(event) => setTheme(event.currentTarget.value)}>
+                {#each themes as theme}
+                  <option value={theme.id}>{theme.name} · {theme.mode === 'dark' ? '深色' : '浅色'}</option>
+                {/each}
+              </select>
+            </label>
+            <div class="appearance-actions">
+              <button on:click={() => void chooseBackground()}><ImageIcon size={14} />选择背景图</button>
+              {#if backgroundPath}
+                <button on:click={clearBackground}>清除背景图</button>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
       <button
         class:active={!$preferences.leftClosed && Boolean($workspace.root)}
         title="文件栏"
