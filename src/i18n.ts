@@ -299,7 +299,7 @@ export const text: Record<Language, AppText> = {
     actions: {
       open: 'Open',
       openFile: 'Open file',
-      openFolder: 'Open',
+      openFolder: 'Open folder',
       refresh: 'Refresh',
       save: 'Save',
       setDefault: 'Default',

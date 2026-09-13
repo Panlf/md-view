@@ -78,8 +78,16 @@
     return path;
   }
   function rowPointerDown(event: PointerEvent, row: TreeRow) {
-    if (event.button !== 0) return;
+    // 仅鼠标启用拖拽：触屏按下后滑动是滚动手势，不能劫持成拖动。
+    if (event.button !== 0 || event.pointerType !== 'mouse') return;
     dragCandidate = { row, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY };
+  }
+  function windowPointerCancel(event: PointerEvent) {
+    if (dragCandidate && event.pointerId === dragCandidate.pointerId) {
+      dragCandidate = null;
+      dragging = null;
+      dragOverPath = '';
+    }
   }
   function windowPointerMove(event: PointerEvent) {
     if (!dragCandidate || event.pointerId !== dragCandidate.pointerId) return;
@@ -198,4 +206,8 @@
   </div>
 {/if}
 
-<svelte:window on:pointermove={windowPointerMove} on:pointerup={windowPointerUp} />
+<svelte:window
+  on:pointermove={windowPointerMove}
+  on:pointerup={windowPointerUp}
+  on:pointercancel={windowPointerCancel}
+/>

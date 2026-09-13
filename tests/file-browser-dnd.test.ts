@@ -57,11 +57,13 @@ function firePointer(
 ) {
   const event = new Event(type, { bubbles: true, cancelable: true }) as Event & {
     pointerId: number;
+    pointerType: string;
     button: number;
     clientX: number;
     clientY: number;
   };
   event.pointerId = 1;
+  event.pointerType = 'mouse';
   event.button = 0;
   event.clientX = x;
   event.clientY = y;

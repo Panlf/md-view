@@ -574,7 +574,10 @@
             aria-label="主题与背景"
             tabindex="-1"
             on:click|stopPropagation
-            on:keydown|stopPropagation
+            on:keydown={(event) => {
+              event.stopPropagation();
+              if (event.key === 'Escape') appearanceOpen = false;
+            }}
           >
             <label class="appearance-field">
               <span>主题</span>
