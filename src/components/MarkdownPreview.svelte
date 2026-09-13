@@ -250,10 +250,6 @@
 
   function findCurrentReadingBlock(blocks: HTMLElement[]) {
     if (blocks.length === 0) return null;
-    const maxScroll = previewHost.scrollHeight - previewHost.clientHeight;
-    if (maxScroll > 0 && previewHost.scrollTop >= maxScroll - 2) {
-      return blocks[blocks.length - 1] ?? null;
-    }
     const hostRect = previewHost.getBoundingClientRect();
     const focusY = hostRect.top + hostRect.height * 0.25;
     let candidate: HTMLElement | null = null;
@@ -277,11 +273,12 @@
 
   function getReadingBlocks() {
     if (!previewHost) return [];
-    return Array.from(
-      previewHost.querySelectorAll<HTMLElement>(
-        ':scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > p, :scope > ul, :scope > ol, :scope > blockquote, :scope > dl, :scope > details, :scope > figure, :scope > pre, :scope > table, :scope > nav, :scope > section, :scope > .markdown-mermaid, :scope > .markdown-properties, :scope > .markdown-frontmatter'
-      )
-    ).filter((block) => block.offsetParent !== null && block.getBoundingClientRect().height > 0);
+    // 直接取全部顶层子元素：枚举标签会漏掉 hr、正文内嵌的原生 HTML（div/iframe/video 等），
+    // 指示条落不上这些块就会在滚动时整段跳过。
+    return Array.from(previewHost.children).filter(
+      (block): block is HTMLElement =>
+        block instanceof HTMLElement && block.offsetParent !== null && block.getBoundingClientRect().height > 0
+    );
   }
 
   function findActiveHeadingLine(block: HTMLElement | null) {
