@@ -37,6 +37,12 @@
   let blockLines = new WeakMap<HTMLElement, number>();
   let layoutDirty = true;
   let restoredPosition = false;
+  // 大纲跳转后钉住所选标题作为高亮，直到用户真正滚动内容（滚轮/滚动条/触摸），
+  // 否则高亮由 25% 阅读线推导：短小节会跳到下一个标题、文末会落在上一个标题。
+  let pinnedActiveLine = 0;
+  function clearActiveLinePin() {
+    pinnedActiveLine = 0;
+  }
   function invalidateLayout() {
     layoutDirty = true;
     scheduleReadingPositionUpdate();
@@ -51,14 +57,20 @@
     previewHost.addEventListener('click', handleClick);
     previewHost.addEventListener('scroll', scheduleReadingPositionUpdate, { passive: true });
     previewHost.addEventListener('load', invalidateLayout, true);
+    previewHost.addEventListener('wheel', clearActiveLinePin, { passive: true });
+    previewHost.addEventListener('pointerdown', clearActiveLinePin);
+    previewHost.addEventListener('touchstart', clearActiveLinePin, { passive: true });
     resizeObserver = new ResizeObserver(invalidateLayout);
     resizeObserver.observe(previewHost);
     return () => {
       previewHost.removeEventListener('click', handleClick);
       previewHost.removeEventListener('scroll', scheduleReadingPositionUpdate);
+      previewHost.removeEventListener('load', invalidateLayout, true);
+      previewHost.removeEventListener('wheel', clearActiveLinePin);
+      previewHost.removeEventListener('pointerdown', clearActiveLinePin);
+      previewHost.removeEventListener('touchstart', clearActiveLinePin);
       dispatch('position', previewHost.scrollTop);
       renderToken += 1;
-      previewHost.removeEventListener('load', invalidateLayout, true);
       resizeObserver?.disconnect();
       if (scrollFrame) {
         cancelAnimationFrame(scrollFrame);
@@ -157,6 +169,7 @@
 
   export function scrollToLine(line: number) {
     const target = previewHost?.querySelector(`[data-outline-line="${line}"]`);
+    pinnedActiveLine = target ? line : 0;
     scrollTargetToTop(target);
     scheduleReadingPositionUpdate();
   }
@@ -233,6 +246,8 @@
       /* Use the literal anchor. */
     }
     const target = previewHost?.querySelector(`#${CSS.escape(anchor)}, [name="${CSS.escape(anchor)}"]`);
+    const anchorLine = Number(target?.getAttribute('data-outline-line'));
+    pinnedActiveLine = target ? anchorLine || 0 : 0;
     scrollTargetToTop(target);
     scheduleReadingPositionUpdate();
   }
@@ -247,6 +262,7 @@
 
   function resetReadingPosition() {
     clearReadingFocusClasses();
+    clearActiveLinePin();
     lastActiveLine = -1;
     lastReadingProgress = -1;
   }
@@ -291,7 +307,7 @@
       updateReadingFocusClasses(nextBlock, blocks);
     }
 
-    const activeLine = findActiveHeadingLine(nextBlock);
+    const activeLine = pinnedActiveLine || findActiveHeadingLine(nextBlock);
     if (activeLine !== lastActiveLine) {
       lastActiveLine = activeLine;
       dispatch('activeLine', activeLine);
