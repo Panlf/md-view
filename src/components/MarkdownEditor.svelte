@@ -5,13 +5,15 @@
   import { markdown } from '@codemirror/lang-markdown';
   import { bracketMatching, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
   import { searchKeymap } from '@codemirror/search';
-  import { EditorState } from '@codemirror/state';
+  import { EditorState, StateEffect } from '@codemirror/state';
   import { keymap } from '@codemirror/view';
   import { tags as t } from '@lezer/highlight';
 
   export let value = '';
+  export let savedState: EditorState | null = null;
+  export let initialScroll = 0;
 
-  const dispatch = createEventDispatcher<{ change: string }>();
+  const dispatch = createEventDispatcher<{ change: string; state: { state: EditorState; scroll: number } }>();
   let host: HTMLDivElement;
   let view: EditorView | undefined;
   let lastApplied = value;
@@ -61,29 +63,30 @@
   ]);
 
   onMount(() => {
-    view = new EditorView({
-      parent: host,
-      state: EditorState.create({
-        doc: value,
-        extensions: [
-          basicSetup,
-          history(),
-          markdown(),
-          bracketMatching(),
-          EditorView.editable.of(true),
-          themedEditor,
-          syntaxHighlighting(themedHighlight),
-          keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
-          EditorView.lineWrapping,
-          EditorView.updateListener.of((update) => {
-            if (!update.docChanged) return;
-            const next = update.state.doc.toString();
-            lastApplied = next;
-            dispatch('change', next);
-          })
-        ]
+    const extensions = [
+      basicSetup,
+      history(),
+      markdown(),
+      bracketMatching(),
+      EditorView.editable.of(true),
+      themedEditor,
+      syntaxHighlighting(themedHighlight),
+      keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+      EditorView.lineWrapping,
+      EditorView.updateListener.of((update) => {
+        if (!update.docChanged) return;
+        const next = update.state.doc.toString();
+        lastApplied = next;
+        dispatch('change', next);
       })
-    });
+    ];
+    let state = savedState
+      ? savedState.update({ effects: StateEffect.reconfigure.of(extensions) }).state
+      : EditorState.create({ doc: value, extensions });
+    if (state.doc.toString() !== value)
+      state = state.update({ changes: { from: 0, to: state.doc.length, insert: value } }).state;
+    view = new EditorView({ parent: host, state });
+    view.scrollDOM.scrollTop = initialScroll;
   });
 
   $: if (view && value !== lastApplied && value !== view.state.doc.toString()) {
@@ -105,6 +108,7 @@
   }
 
   onDestroy(() => {
+    if (view) dispatch('state', { state: view.state, scroll: view.scrollDOM.scrollTop });
     view?.destroy();
   });
 </script>

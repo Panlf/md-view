@@ -1,12 +1,49 @@
 export type FileKind = 'directory' | 'file';
 
-export type FileNode = {
+export type DiskRevision = { modified: string; size: number; hash: string };
+export type DocumentFile = {
+  id: string;
   path: string;
-  name: string;
-  kind: FileKind;
-  children: FileNode[];
-  size: number;
-  modified_at: number;
+  content: string;
+  encoding: string;
+  bom: boolean;
+  newline: string;
+  revision: DiskRevision;
+};
+export type SaveRequest = {
+  path: string;
+  content: string;
+  encoding: string;
+  bom: boolean;
+  newline: string;
+  expected: DiskRevision | null;
+};
+export type SaveReply = {
+  file: DocumentFile | null;
+  code: 'conflict' | 'encoding' | null;
+  message: string | null;
+};
+export type DirectoryEntry = { path: string; name: string; kind: FileKind; size: number };
+export type DirectoryBatch = {
+  request_id: string;
+  path: string;
+  entries: DirectoryEntry[];
+  errors: string[];
+  complete: boolean;
+  version: string;
+};
+export type ScanBatch = {
+  request_id: string;
+  files: DirectoryEntry[];
+  headings: WorkspaceHeading[];
+  scanned: number;
+  skipped: number;
+  errors?: string[];
+  elapsed_ms: number;
+  complete: boolean;
+  cancelled: boolean;
+  incomplete: boolean;
+  message: string | null;
 };
 
 export type Heading = {
@@ -32,28 +69,6 @@ export type LinkValidationResult = {
 export type WorkspaceHeading = Heading & {
   path: string;
   file_name: string;
-};
-
-export type ReadFileResult = {
-  path: string;
-  content: string;
-  encoding: string;
-  modified_at: number;
-};
-
-export type OpenPathResult = {
-  kind: 'workspace' | 'file';
-  workspace_path?: string;
-  file_path?: string;
-  tree?: FileNode;
-  file?: ReadFileResult;
-};
-
-export type SaveResult = {
-  ok: boolean;
-  conflict: boolean;
-  modified_at?: number;
-  message?: string;
 };
 
 export type DraftContent = {

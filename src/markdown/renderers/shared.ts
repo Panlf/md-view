@@ -2,7 +2,22 @@ import DOMPurify from 'dompurify';
 import { isLocalMarkdownPath, resolveLocalPath, toImageAssetSrc } from '../../fileAssets';
 import type { Heading, LinkValidationRequest } from '../../types';
 
-const SAFE_EXTRA_TAGS = ['button', 'details', 'summary', 'input', 'mark', 'ins', 'sub', 'sup', 'kbd', 'dl', 'dt', 'dd', 'nav', 'section'];
+const SAFE_EXTRA_TAGS = [
+  'button',
+  'details',
+  'summary',
+  'input',
+  'mark',
+  'ins',
+  'sub',
+  'sup',
+  'kbd',
+  'dl',
+  'dt',
+  'dd',
+  'nav',
+  'section'
+];
 const SAFE_BASE_ATTRIBUTES = [
   'align',
   'class',
@@ -27,7 +42,11 @@ export type MarkdownRenderResult = {
   linkTargets?: LinkValidationRequest[];
 };
 
-export function postProcessMarkdownHtml(raw: string, context: MarkdownRenderContext, extraAllowedAttrs: string[] = []) {
+export function postProcessMarkdownHtml(
+  raw: string,
+  context: MarkdownRenderContext,
+  extraAllowedAttrs: string[] = []
+) {
   const template = document.createElement('template');
   template.innerHTML = raw;
 
@@ -66,18 +85,38 @@ export function postProcessMarkdownHtml(raw: string, context: MarkdownRenderCont
   });
 
   const renderedHeadings = template.content.querySelectorAll('h1,h2,h3,h4,h5,h6');
+  const usedIds = new Set(context.headings.map((heading) => heading.anchor));
+  const slugCounts = new Map<string, number>();
   renderedHeadings.forEach((node, index) => {
     const heading = context.headings[index];
     if (!heading) return;
     node.setAttribute('id', stableHeadingId(heading, index));
     node.setAttribute('data-outline-line', String(heading.line));
+    const base = slugHeading(heading.text, index).replace(/^heading-/, '');
+    const count = slugCounts.get(base) || 0;
+    slugCounts.set(base, count + 1);
+    const slug = count ? `${base}-${count}` : base;
+    for (const id of [slug, `heading-${slug}`]) {
+      if (usedIds.has(id)) continue;
+      usedIds.add(id);
+      const alias = document.createElement('span');
+      alias.id = id;
+      alias.setAttribute('aria-hidden', 'true');
+      node.prepend(alias);
+    }
   });
 
   return DOMPurify.sanitize(template.innerHTML, {
     ADD_TAGS: SAFE_EXTRA_TAGS,
-    ADD_ATTR: [...SAFE_BASE_ATTRIBUTES, 'data-local-anchor', 'data-source-href', 'data-source-src', ...extraAllowedAttrs],
+    ADD_ATTR: [
+      ...SAFE_BASE_ATTRIBUTES,
+      'data-local-anchor',
+      'data-source-href',
+      'data-source-src',
+      ...extraAllowedAttrs
+    ],
     ADD_URI_SAFE_ATTR: ['src'],
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data|blob|asset):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data|blob|asset):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
   });
 }
 

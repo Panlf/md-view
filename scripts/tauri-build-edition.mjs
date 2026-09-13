@@ -27,7 +27,8 @@ const tauriBin = join(root, 'node_modules', '.bin', process.platform === 'win32'
 const tauriBuildArgs = buildArgs.length > 0 ? buildArgs : ['--bundles', 'nsis'];
 const buildStartedAt = Date.now();
 const rootReleaseDir = join(root, 'release');
-const result = spawnSync(tauriBin, ['build', ...tauriBuildArgs, '--config', generatedPath], {
+// Keep our config before a caller's `--` separator, which starts Cargo arguments.
+const result = spawnSync(tauriBin, ['build', '--config', generatedPath, ...tauriBuildArgs], {
   cwd: root,
   shell: process.platform === 'win32',
   stdio: 'inherit'

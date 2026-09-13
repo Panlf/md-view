@@ -9,11 +9,15 @@ export async function openExternalUrl(url: string): Promise<void> {
     return;
   }
 
-  const { openExternalUrl: tauriOpenExternalUrl } = await import('./tauri');
+  const { openExternalUrl: tauriOpenExternalUrl } = await import('./api');
   return tauriOpenExternalUrl(url);
 }
 
-export async function validateLocalLinks(path: string, links: LinkValidationRequest[]): Promise<LinkValidationResult[]> {
+export async function validateLocalLinks(
+  path: string,
+  links: LinkValidationRequest[],
+  anchors: string[] = []
+): Promise<LinkValidationResult[]> {
   if (isWebRuntime) {
     return links.map((link) => ({
       href: link.href,
@@ -22,6 +26,6 @@ export async function validateLocalLinks(path: string, links: LinkValidationRequ
     }));
   }
 
-  const { validateLocalLinks: tauriValidateLocalLinks } = await import('./tauri');
-  return tauriValidateLocalLinks(path, links);
+  const { validateLocalLinks: tauriValidateLocalLinks } = await import('./api');
+  return tauriValidateLocalLinks(path, links, anchors);
 }

@@ -406,6 +406,8 @@ function configureMermaid(mermaid: MermaidModule) {
   mermaid.default.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    // SVG text survives the final sanitizer, which removes foreignObject content.
+    htmlLabels: false,
     suppressErrorRendering: true,
     theme: document.documentElement.dataset.themeMode === 'dark' ? 'dark' : 'default'
   });

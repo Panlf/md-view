@@ -10,10 +10,12 @@
   export let preferences: unknown = undefined;
   export let fallbackRenderStatus = '';
   export let readingFocusEnabled = true;
+  export let initialScroll = 0;
 
   const dispatch = createEventDispatcher<{
     activeLine: number;
-    openLocalFile: string;
+    openLocalFile: { path: string; anchor?: string };
+    position: number;
     renderHtml: string;
     renderStatus: string;
     readingProgress: number;
@@ -30,6 +32,15 @@
   let lastReadingProgress = -1;
   let imageOverlay: { src: string; source: string; scale: number } | null = null;
   let deferredRenderTimer = 0;
+  let readingBlocks: HTMLElement[] = [];
+  let blockTops: number[] = [];
+  let blockLines = new WeakMap<HTMLElement, number>();
+  let layoutDirty = true;
+  let restoredPosition = false;
+  function invalidateLayout() {
+    layoutDirty = true;
+    scheduleReadingPositionUpdate();
+  }
   $: if (!readingFocusEnabled) {
     clearReadingFocusClasses();
   } else {
@@ -39,13 +50,15 @@
   onMount(() => {
     previewHost.addEventListener('click', handleClick);
     previewHost.addEventListener('scroll', scheduleReadingPositionUpdate, { passive: true });
-    previewHost.addEventListener('load', scheduleReadingPositionUpdate, true);
-    resizeObserver = new ResizeObserver(scheduleReadingPositionUpdate);
+    previewHost.addEventListener('load', invalidateLayout, true);
+    resizeObserver = new ResizeObserver(invalidateLayout);
     resizeObserver.observe(previewHost);
     return () => {
       previewHost.removeEventListener('click', handleClick);
       previewHost.removeEventListener('scroll', scheduleReadingPositionUpdate);
-      previewHost.removeEventListener('load', scheduleReadingPositionUpdate, true);
+      dispatch('position', previewHost.scrollTop);
+      renderToken += 1;
+      previewHost.removeEventListener('load', invalidateLayout, true);
       resizeObserver?.disconnect();
       if (scrollFrame) {
         cancelAnimationFrame(scrollFrame);
@@ -70,6 +83,10 @@
       applyRenderResult(quick, false);
       await tickAfterHtml();
       if (token !== renderToken) return;
+      if (!restoredPosition) {
+        previewHost.scrollTop = initialScroll;
+      }
+      layoutDirty = true;
       resetReadingPosition();
       updateReadingPosition();
       deferredRenderTimer = window.setTimeout(() => {
@@ -87,17 +104,31 @@
     }
   }
 
-  async function renderFullPreview(source: string, headings: Heading[], markdownPath: string, prefs: unknown, token: number) {
+  async function renderFullPreview(
+    source: string,
+    headings: Heading[],
+    markdownPath: string,
+    prefs: unknown,
+    token: number
+  ) {
     try {
       const result = await renderFullMarkdown(source, headings, markdownPath, prefs);
       if (token !== renderToken) return;
+      const scroll = restoredPosition ? previewHost.scrollTop : initialScroll;
       applyRenderResult(result, true);
       await tickAfterHtml();
       if (token !== renderToken) return;
+      previewHost.scrollTop = scroll;
+      restoredPosition = true;
+      layoutDirty = true;
       resetReadingPosition();
       updateReadingPosition();
       if (shouldValidateLocalLinks(prefs) && result.linkTargets?.length) {
-        const validation = await validateLocalLinks(markdownPath, result.linkTargets);
+        const validation = await validateLocalLinks(
+          markdownPath,
+          result.linkTargets,
+          Array.from(previewHost.querySelectorAll<HTMLElement>('[id]')).map((node) => node.id)
+        );
         if (token === renderToken) {
           applyLinkValidation(validation);
         }
@@ -149,7 +180,11 @@
     const image = target?.closest('img');
     if (image instanceof HTMLImageElement) {
       event.preventDefault();
-      imageOverlay = { src: image.currentSrc || image.src, source: image.dataset.sourceSrc ?? image.getAttribute('src') ?? '', scale: 1 };
+      imageOverlay = {
+        src: image.currentSrc || image.src,
+        source: image.dataset.sourceSrc ?? image.getAttribute('src') ?? '',
+        scale: 1
+      };
       return;
     }
 
@@ -172,11 +207,23 @@
     const localFile = link.dataset.localFile;
     if (!localFile) return;
     event.preventDefault();
-    dispatch('openLocalFile', localFile);
+    const fragment = (link.dataset.sourceHref || '').split('#').slice(1).join('#');
+    let anchor = fragment;
+    try {
+      anchor = decodeURIComponent(fragment);
+    } catch {
+      /* Preserve malformed literal fragments. */
+    }
+    dispatch('openLocalFile', { path: localFile, anchor: anchor || undefined });
   }
 
-  function scrollToAnchor(anchor: string) {
+  export function scrollToAnchor(anchor: string) {
     if (!anchor) return;
+    try {
+      anchor = decodeURIComponent(anchor);
+    } catch {
+      /* Use the literal anchor. */
+    }
     const target = previewHost?.querySelector(`#${CSS.escape(anchor)}, [name="${CSS.escape(anchor)}"]`);
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
@@ -250,61 +297,56 @@
 
   function findCurrentReadingBlock(blocks: HTMLElement[]) {
     if (blocks.length === 0) return null;
-    const hostRect = previewHost.getBoundingClientRect();
-    const focusY = hostRect.top + hostRect.height * 0.25;
-    let candidate: HTMLElement | null = null;
-
-    for (const block of blocks) {
-      const rect = block.getBoundingClientRect();
-      if (rect.height <= 0 || rect.bottom < hostRect.top) continue;
-      if (rect.top <= focusY && rect.bottom >= focusY) {
-        return block;
-      }
-      if (rect.top <= focusY) {
-        candidate = block;
-        continue;
-      }
-      if (candidate) return candidate;
-      return block;
+    const focusY = previewHost.scrollTop + previewHost.clientHeight * 0.25;
+    let left = 0,
+      right = blockTops.length;
+    while (left < right) {
+      const middle = (left + right) >>> 1;
+      if (blockTops[middle] <= focusY) left = middle + 1;
+      else right = middle;
     }
-
-    return candidate ?? blocks[blocks.length - 1] ?? null;
+    return blocks[Math.max(0, left - 1)] ?? null;
   }
 
   function getReadingBlocks() {
     if (!previewHost) return [];
-    // 直接取全部顶层子元素：枚举标签会漏掉 hr、正文内嵌的原生 HTML（div/iframe/video 等），
+    if (!layoutDirty) return readingBlocks;
+    const hostTop = previewHost.getBoundingClientRect().top;
+    // 直接取全部顶层子元素：枚举标签会漏掉 hr 与正文内嵌的原生 HTML（div/iframe/video 等），
     // 指示条落不上这些块就会在滚动时整段跳过。
-    return Array.from(previewHost.children).filter(
+    readingBlocks = Array.from(previewHost.children).filter(
       (block): block is HTMLElement =>
         block instanceof HTMLElement && block.offsetParent !== null && block.getBoundingClientRect().height > 0
     );
+    blockTops = readingBlocks.map(
+      (block) => block.getBoundingClientRect().top - hostTop + previewHost.scrollTop
+    );
+    blockLines = new WeakMap();
+    let headingLine = 0;
+    for (const block of readingBlocks) {
+      headingLine = Number(block.dataset.outlineLine) || headingLine;
+      blockLines.set(block, headingLine);
+    }
+    layoutDirty = false;
+    return readingBlocks;
   }
 
   function findActiveHeadingLine(block: HTMLElement | null) {
-    if (!block) return 0;
-    const ownLine = Number(block.dataset.outlineLine);
-    if (ownLine) return ownLine;
-    let cursor: Element | null = block.previousElementSibling;
-    while (cursor) {
-      if (cursor instanceof HTMLElement) {
-        const line = Number(cursor.dataset.outlineLine);
-        if (line) return line;
-      }
-      cursor = cursor.previousElementSibling;
-    }
-    return 0;
+    return block ? blockLines.get(block) || 0 : 0;
   }
 
   function applyLinkValidation(results: LinkValidationResult[]) {
     const broken = results.filter((result) => !result.ok);
     for (const result of results) {
       if (result.ok) continue;
-      const nodes = result.kind === 'image'
-        ? Array.from(previewHost?.querySelectorAll<HTMLElement>('img[data-source-src]') ?? []).filter((node) => node.dataset.sourceSrc === result.href)
-        : Array.from(previewHost?.querySelectorAll<HTMLElement>('a') ?? []).filter(
-            (node) => node.dataset.sourceHref === result.href || node.getAttribute('href') === result.href
-          );
+      const nodes =
+        result.kind === 'image'
+          ? Array.from(previewHost?.querySelectorAll<HTMLElement>('img[data-source-src]') ?? []).filter(
+              (node) => node.dataset.sourceSrc === result.href
+            )
+          : Array.from(previewHost?.querySelectorAll<HTMLElement>('a') ?? []).filter(
+              (node) => node.dataset.sourceHref === result.href || node.getAttribute('href') === result.href
+            );
       nodes.forEach((node) => {
         node.classList.add('markdown-broken-link');
         node.title = result.message ?? 'Local target not found';
@@ -322,9 +364,18 @@
     if (!wrapper) return;
     const action = button.dataset.mermaidAction;
     const current = Number(wrapper.dataset.mermaidScale ?? '1') || 1;
-    const next = action === 'zoom-in' ? current + 0.15 : action === 'zoom-out' ? current - 0.15 : action === 'reset' || action === 'fit' ? 1 : current;
+    const next =
+      action === 'zoom-in'
+        ? current + 0.15
+        : action === 'zoom-out'
+          ? current - 0.15
+          : action === 'reset' || action === 'fit'
+            ? 1
+            : current;
     if (action === 'copy-source') {
-      void navigator.clipboard?.writeText(wrapper.dataset.mermaidSource ?? button.parentElement?.dataset.mermaidSource ?? '');
+      void navigator.clipboard?.writeText(
+        wrapper.dataset.mermaidSource ?? button.parentElement?.dataset.mermaidSource ?? ''
+      );
       return;
     }
     wrapper.dataset.mermaidScale = String(Math.max(0.45, Math.min(2.4, next)));
@@ -395,7 +446,9 @@
       <span title={imageOverlay.source}>{imageOverlay.source}</span>
       <button type="button" on:click={() => zoomImage(-0.15)}>缩小</button>
       <button type="button" on:click={() => zoomImage(0.15)}>放大</button>
-      <button type="button" on:click={() => void navigator.clipboard?.writeText(imageOverlay?.source ?? '')}>复制路径</button>
+      <button type="button" on:click={() => void navigator.clipboard?.writeText(imageOverlay?.source ?? '')}
+        >复制路径</button
+      >
       <button type="button" on:click={closeImageOverlay}>关闭</button>
     </div>
     <div class="image-preview-stage">

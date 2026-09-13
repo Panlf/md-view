@@ -472,6 +472,38 @@ const amberDark: ThemeTokens = {
 };
 
 export const themes: AppTheme[] = [
+  {
+    id: 'forest-paper',
+    name: '纸上森林 Light',
+    mode: 'light',
+    accent: '#285c47',
+    tokens: {
+      ...teaLight,
+      appBg: '#f7f6f1',
+      appText: '#273b33',
+      panelBg: '#f7f6f1',
+      panelText: '#273b33',
+      panelMuted: '#748178',
+      contentBg: '#fffefa',
+      border: '#dfe4da',
+      borderSoft: '#e8ebe2',
+      primary: '#285c47',
+      primaryHover: '#214e3c',
+      selectedBg: '#ebeee5',
+      selectedText: '#285c47',
+      segmentedBg: '#ebeee5',
+      buttonBg: '#fffefa',
+      buttonHover: '#ebeee5',
+      muted: '#748178',
+      editorBg: '#fffefa',
+      editorGutterBg: '#f0f2eb',
+      editorHeading: '#285c47',
+      markdownH1: '#285c47',
+      markdownH2: '#285c47',
+      markdownText: '#273b33',
+      markdownCodeBg: '#f0f2eb'
+    }
+  },
   { id: 'tea-light', name: '清茶 Light', mode: 'light', accent: '#2d7d7f', tokens: teaLight },
   { id: 'ink-light', name: '墨蓝 Light', mode: 'light', accent: '#3468b7', tokens: inkLight },
   { id: 'paper-light', name: '暖纸 Light', mode: 'light', accent: '#a5652a', tokens: paperLight },
