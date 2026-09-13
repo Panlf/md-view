@@ -51,7 +51,8 @@ it('HTML export in source mode renders the latest edits without requiring a visi
   (document.querySelector('[data-testid="type-document"]') as HTMLButtonElement).click();
   await tick();
   [...document.querySelectorAll('button')].find((button) => button.textContent === '下载 HTML')!.click();
-  await vi.waitFor(() => expect(downloads).toHaveLength(1));
+  // 源码模式导出会即时补一次全量渲染（含 mermaid 加载），jsdom 下耗时数秒，放宽等待窗口。
+  await vi.waitFor(() => expect(downloads).toHaveLength(1), { timeout: 20000 });
   const html = await downloads[0].text();
   expect(html).toContain('Edited from the editor');
   expect(html).not.toContain('flowchart LR');

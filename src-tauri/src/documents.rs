@@ -278,14 +278,33 @@ pub fn is_link(metadata: &fs::Metadata) -> bool {
     }
 }
 
+/// 资源协议目录授权去重：同一目录只授权一次，避免长会话下 scope 无界增长。
+/// 工作区根目录也在 directory_load 时整体授权一次，跨目录引用的图片因此可用。
+pub fn allow_asset_directory(app: &AppHandle, path: &Path) -> Result<()> {
+    use std::{
+        collections::HashSet,
+        sync::{Mutex, OnceLock},
+    };
+    static ALLOWED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let key = path_id(path);
+    let allowed = ALLOWED.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut allowed = allowed.lock().unwrap();
+    if allowed.contains(&key) {
+        return Ok(());
+    }
+    app.asset_protocol_scope()
+        .allow_directory(path, true)
+        .map_err(|e| e.to_string())?;
+    allowed.insert(key);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn document_open(app: AppHandle, path: String) -> Result<DocumentFile> {
     blocking(move || {
         let file = read_document(Path::new(&path))?;
         if let Some(parent) = Path::new(&file.path).parent() {
-            app.asset_protocol_scope()
-                .allow_directory(parent, true)
-                .map_err(|e| e.to_string())?;
+            allow_asset_directory(&app, parent)?;
         }
         Ok(file)
     })

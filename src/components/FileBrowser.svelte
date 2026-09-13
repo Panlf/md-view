@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import {
     ChevronRight,
     ChevronDown,
@@ -34,6 +34,27 @@
   let dragging: TreeRow | null = null;
   let dragOverPath = '';
   let suppressClick = false;
+  // 拖到可视区上下边缘时自动滚动列表，光标位置随滚动重新命中目标。
+  let autoScrollDir = 0;
+  let autoScrollFrame = 0;
+  let lastPointer = { x: 0, y: 0 };
+  function stopAutoScroll() {
+    autoScrollDir = 0;
+    if (autoScrollFrame) {
+      cancelAnimationFrame(autoScrollFrame);
+      autoScrollFrame = 0;
+    }
+  }
+  function autoScrollStep() {
+    if (!autoScrollDir || !viewport || !dragging) {
+      stopAutoScroll();
+      return;
+    }
+    viewport.scrollTop += autoScrollDir * 9;
+    dragOverPath = hitTestDir(lastPointer.x, lastPointer.y);
+    autoScrollFrame = requestAnimationFrame(autoScrollStep);
+  }
+  onDestroy(stopAutoScroll);
   $: rows = flattenTree(workspace);
   $: start = Math.max(0, Math.floor(scrollTop / rowHeight) - 6);
   $: visible = rows.slice(start, start + Math.ceil(height / rowHeight) + 12);
@@ -57,8 +78,7 @@
     await tick();
     viewport.querySelector<HTMLButtonElement>(`[data-row="${next}"]`)?.focus();
   }
-  function dropAllowed(targetDir: string, source: TreeRow | null = dragging) {
-    if (!source) return false;
+  function dropAllowed(targetDir: string, source: TreeRow | null = dragging) {    if (!source) return false;
     const src = source.entry.path;
     // 目标是自己、自己所在目录、或自己的子目录时拒绝放置。
     if (pathKey(src) === pathKey(targetDir)) return false;
@@ -87,6 +107,7 @@
       dragCandidate = null;
       dragging = null;
       dragOverPath = '';
+      stopAutoScroll();
     }
   }
   function windowPointerMove(event: PointerEvent) {
@@ -98,7 +119,17 @@
     }
     if (!dragging) return;
     event.preventDefault();
+    lastPointer = { x: event.clientX, y: event.clientY };
     dragOverPath = hitTestDir(event.clientX, event.clientY);
+    if (viewport) {
+      const rect = viewport.getBoundingClientRect();
+      const edge = 32;
+      if (event.clientY < rect.top + edge && viewport.scrollTop > 0) autoScrollDir = -9;
+      else if (event.clientY > rect.bottom - edge) autoScrollDir = 9;
+      else autoScrollDir = 0;
+      if (autoScrollDir && !autoScrollFrame) autoScrollFrame = requestAnimationFrame(autoScrollStep);
+      if (!autoScrollDir) stopAutoScroll();
+    }
   }
   function windowPointerUp(event: PointerEvent) {
     if (!dragCandidate || event.pointerId !== dragCandidate.pointerId) return;
@@ -108,6 +139,7 @@
     dragCandidate = null;
     dragging = null;
     dragOverPath = '';
+    stopAutoScroll();
     if (!wasDragging) return;
     suppressClick = true;
     setTimeout(() => (suppressClick = false), 0);
@@ -211,3 +243,4 @@
   on:pointerup={windowPointerUp}
   on:pointercancel={windowPointerCancel}
 />
+

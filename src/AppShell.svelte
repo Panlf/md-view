@@ -32,7 +32,7 @@
   import MarkdownPreview from './components/MarkdownPreview.svelte';
   import OutlinePanel from './components/OutlinePanel.svelte';
   import { createDesktop } from './state/desktop';
-  import { dirty, filename, parentPath } from './state/documents';
+  import { dirty, filename, parentPath, pathKey } from './state/documents';
   import { extractHeadingsFromMarkdown } from './outline';
   import { applyTheme, BACKGROUND_IMAGE_STORAGE_KEY, findTheme, THEME_STORAGE_KEY, themes } from './themes';
   import { loadLanguage, saveLanguage, text, type Language } from './i18n';
@@ -294,6 +294,21 @@
       await desktop.error(error);
     }
   }
+  // 最近列表点击：文件已不存在时静默移除该条目，不再弹错。
+  async function openRecent(path: string) {
+    try {
+      await api.pathKind(path);
+    } catch {
+      desktop.setPreferences({
+        ...$preferences,
+        recent: $preferences.recent.filter((item) => pathKey(item) !== pathKey(path))
+      });
+      status.set('文件已不存在，已从最近打开中移除');
+      return;
+    }
+    await desktop.openFile(path);
+  }
+
   function menu(entry: DirectoryEntry, x: number, y: number) {
     contextMenu = {
       entry,
@@ -740,7 +755,7 @@
           {#if $preferences.recent.length}<div class="recent-files">
               <span>最近打开</span>{#each $preferences.recent.slice(0, 5) as path}<button
                   title={path}
-                  on:click={() => desktop.openFile(path)}
+                  on:click={() => void openRecent(path)}
                   ><strong>{filename(path)}</strong><small>{parentPath(path)}</small></button
                 >{/each}
             </div>{/if}

@@ -199,6 +199,7 @@ impl WorkspaceState {
 
 #[tauri::command]
 pub async fn directory_load(
+    app: AppHandle,
     state: State<'_, WorkspaceState>,
     root: String,
     path: String,
@@ -215,6 +216,8 @@ pub async fn directory_load(
             if !directory.starts_with(&root) {
                 return Err("目录不属于当前工作区".into());
             }
+            // 工作区根整体授权一次：跨目录引用的图片等资源也能通过资源协议加载。
+            crate::documents::allow_asset_directory(&app, &root)?;
             let version = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
