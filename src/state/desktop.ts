@@ -638,7 +638,7 @@ export function createDesktop() {
       saveTargets.delete(creationId);
     }
   }
-  async function mutate(entry: DirectoryEntry, action: 'rename' | 'move' | 'trash') {
+  async function mutate(entry: DirectoryEntry, action: 'rename' | 'move' | 'trash', presetFolder = '') {
     if (operationPending) {
       status.set('请先完成当前文件操作');
       return;
@@ -653,9 +653,13 @@ export function createDesktop() {
         target = childPath(parentPath(entry.path), name);
       }
       if (action === 'move') {
-        const folder = await open({ directory: true, title: '移动到文件夹' });
-        if (typeof folder !== 'string') return;
-        target = childPath(folder, entry.name);
+        if (presetFolder) {
+          target = childPath(presetFolder, entry.name);
+        } else {
+          const folder = await open({ directory: true, title: '移动到文件夹' });
+          if (typeof folder !== 'string') return;
+          target = childPath(folder, entry.name);
+        }
       }
       if (action === 'trash') {
         if (!(await confirm(`将“${entry.name}”移入回收站？`, { title: '移入回收站', kind: 'warning' })))
@@ -745,6 +749,11 @@ export function createDesktop() {
       operationPending = false;
     }
   }
+
+  // 文件树拖拽移动：直接指定目标文件夹，不再弹选择框。
+  function moveEntry(source: DirectoryEntry, folder: string) {
+    return mutate(source, 'move', folder);
+  }
   function dispose() {
     disposed = true;
     cancelSearch();
@@ -792,6 +801,7 @@ export function createDesktop() {
     newFile,
     newFolder,
     mutate,
+    moveEntry,
     dispose
   };
 }

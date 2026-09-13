@@ -147,7 +147,7 @@ export const text: Record<Language, AppText> = {
     actions: {
       open: '打开',
       openFile: '打开文件',
-      openFolder: '打开目录',
+      openFolder: '打开文件夹',
       refresh: '刷新',
       save: '保存',
       setDefault: '设为默认',

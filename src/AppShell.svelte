@@ -10,7 +10,6 @@
     FilePlus2,
     FolderOpen,
     Save,
-    Search,
     Settings,
     PanelLeft,
     PanelRight,
@@ -18,7 +17,11 @@
     Code2,
     Pencil,
     Columns2,
-    Maximize2
+    Maximize2,
+    FileText,
+    Folder,
+    RefreshCw,
+    ChevronDown
   } from 'lucide-svelte';
   import DocumentTabs from './components/DocumentTabs.svelte';
   import FileBrowser from './components/FileBrowser.svelte';
@@ -64,6 +67,7 @@
   let immersive = false;
   let dropActive = false;
   let contextMenu: { entry: DirectoryEntry; x: number; y: number } | null = null;
+  let openMenuOpen = false;
   let Editor: any = null;
   let VisualEditor: any = null;
   let editorPromise: Promise<void> | null = null;
@@ -311,6 +315,7 @@
   function keydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       contextMenu = null;
+      openMenuOpen = false;
       quickOpen = false;
       settingsOpen = false;
       advancedOpen = false;
@@ -460,7 +465,10 @@
   on:keydown={keydown}
   on:pointermove={resizeMove}
   on:pointerup={resizeEnd}
-  on:click={() => (contextMenu = null)}
+  on:click={() => {
+    contextMenu = null;
+    openMenuOpen = false;
+  }}
 />
 
 <main
@@ -470,34 +478,87 @@
   style={`--nav-width:${$preferences.leftWidth}px;--outline-width:${$preferences.rightWidth}px`}
 >
   <header class="desktop-toolbar">
-    <div class="desktop-brand"><BookOpen size={21} /><strong>{editionDisplayName}</strong></div>
-    <div class="desktop-actions">
-      <button title="新建 (Ctrl+N)" aria-label="新建" on:click={desktop.createDocument}
-        ><FilePlus2 size={17} /></button
-      >
-      <button title="打开文件 (Ctrl+O)" on:click={desktop.chooseFiles}
-        ><FolderOpen size={17} /><span>{t.actions.open}</span></button
-      >
+    <div class="toolbar-side toolbar-left">
+      <div class="toolbar-menu">
+        <button
+          class="primary open-trigger"
+          aria-haspopup="menu"
+          aria-expanded={openMenuOpen}
+          on:click|stopPropagation={() => (openMenuOpen = !openMenuOpen)}
+        >
+          <FolderOpen size={16} /><span>{t.actions.open}</span><ChevronDown size={13} />
+        </button>
+        {#if openMenuOpen}
+          <div class="toolbar-popover" role="menu">
+            <button
+              role="menuitem"
+              on:click={() => {
+                openMenuOpen = false;
+                void desktop.chooseFiles();
+              }}
+            >
+              <FileText size={15} /><span>{t.actions.openFile}</span>
+            </button>
+            <button
+              role="menuitem"
+              on:click={() => {
+                openMenuOpen = false;
+                void desktop.chooseWorkspace();
+              }}
+            >
+              <Folder size={15} /><span>{t.actions.openFolder}</span>
+            </button>
+          </div>
+        {/if}
+      </div>
       <button
         title="保存 (Ctrl+S)"
         aria-label="保存"
         disabled={!active || $saving.has(active.id)}
         on:click={() => active && desktop.saveTab(active.id)}><Save size={17} /></button
       >
-      <span class="toolbar-divider"></span>
-      <button class="quick-trigger" title="快速打开 (Ctrl+P)" on:click={() => (quickOpen = true)}
-        ><Search size={15} /><span>快速打开</span><kbd>Ctrl P</kbd></button
+      <button
+        title="刷新目录"
+        aria-label="刷新目录"
+        disabled={!$workspace.root}
+        on:click={() => void desktop.refreshVisible()}><RefreshCw size={17} /></button
       >
     </div>
-    <div class="desktop-utilities">
+    <div class="document-modes toolbar-modes" aria-label="视图模式">
+      <button
+        class:active={active?.mode === 'read'}
+        disabled={!active}
+        title={t.modes.read}
+        on:click={() => active && setMode('read')}><BookOpen size={14} /><span>{t.modes.read}</span></button
+      >
+      <button
+        class:active={active?.mode === 'edit'}
+        disabled={!active}
+        title={t.modes.edit}
+        on:click={() => active && setMode('edit')}><Code2 size={14} /><span>{t.modes.edit}</span></button
+      >
+      <button
+        class:active={active?.mode === 'visual'}
+        disabled={!active}
+        title={t.modes.visual}
+        on:click={() => active && setMode('visual')}><Pencil size={14} /><span>{t.modes.visual}</span></button
+      >
+      <button
+        class:active={active?.mode === 'split'}
+        disabled={!active}
+        title={t.modes.split}
+        on:click={() => active && setMode('split')}><Columns2 size={14} /><span>{t.modes.split}</span></button
+      >
+    </div>
+    <div class="toolbar-side toolbar-right">
       <button
         class:active={!$preferences.leftClosed && Boolean($workspace.root)}
-        title="文件栏 / 打开文件夹"
+        title="文件栏"
         aria-label="切换文件栏"
         on:click={() =>
-          $workspace.root
-            ? desktop.setPreferences({ ...$preferences, leftClosed: !$preferences.leftClosed })
-            : desktop.chooseWorkspace()}><PanelLeft size={17} /></button
+          desktop.setPreferences({ ...$preferences, leftClosed: !$preferences.leftClosed })}><PanelLeft
+          size={17}
+        /></button
       >
       <button
         class:active={!$preferences.rightClosed}
@@ -531,6 +592,7 @@
           onNewFile={() => void desktop.newFile()}
           onNewFolder={() => void desktop.newFolder()}
           onChoose={() => void desktop.chooseWorkspace()}
+          onMoveEntry={(source, targetDir) => void desktop.moveEntry(source, targetDir)}
         />
       </aside>
       <div
@@ -547,35 +609,6 @@
     {/if}
     <section id="document-panel" class="desktop-document" role="tabpanel">
       {#if active}
-        <div class="document-heading">
-          <div class="document-identity">
-            <strong>{filename(active.path)}</strong><small title={active.path}
-              >{active.path ? parentPath(active.path) : '尚未保存到文件'}</small
-            >
-          </div>
-          <div class="document-modes" aria-label="视图模式">
-            <button
-              class:active={active.mode === 'read'}
-              title={t.modes.read}
-              on:click={() => setMode('read')}><BookOpen size={14} /><span>{t.modes.read}</span></button
-            >
-            <button
-              class:active={active.mode === 'edit'}
-              title={t.modes.edit}
-              on:click={() => setMode('edit')}><Code2 size={14} /><span>{t.modes.edit}</span></button
-            >
-            <button
-              class:active={active.mode === 'visual'}
-              title={t.modes.visual}
-              on:click={() => setMode('visual')}><Pencil size={14} /><span>{t.modes.visual}</span></button
-            >
-            <button
-              class:active={active.mode === 'split'}
-              title={t.modes.split}
-              on:click={() => setMode('split')}><Columns2 size={14} /><span>{t.modes.split}</span></button
-            >
-          </div>
-        </div>
         {#if active.externalChanged}<div class="document-warning" role="status">
             <span
               >{active.missing

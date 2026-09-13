@@ -20,65 +20,76 @@
 .desktop-toolbar {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 12px;
   height: 54px;
   flex: 0 0 54px;
   padding: 0 18px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--panel-bg);
 }
-.desktop-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  white-space: nowrap;
-  letter-spacing: -0.3px;
-}
-.desktop-brand svg {
-  color: var(--primary);
-}
-.desktop-brand strong {
-  font-size: 15px;
-  font-weight: 650;
-}
-.desktop-actions,
-.desktop-utilities {
+.toolbar-side {
   display: flex;
   align-items: center;
   gap: 5px;
+  flex: 1;
+  min-width: 0;
 }
-.desktop-utilities {
-  margin-left: auto;
+.toolbar-right {
+  justify-content: flex-end;
 }
 .desktop-toolbar button {
   border: 1px solid transparent;
   background: transparent;
   padding: 6px 9px;
 }
-.desktop-toolbar button:hover,
+.desktop-toolbar button:hover:not(:disabled),
 .desktop-toolbar button.active {
   background: var(--button-hover);
   border-color: var(--border);
 }
-.toolbar-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--border);
-  margin: 0 10px;
+.desktop-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
-.desktop-toolbar .quick-trigger {
-  color: var(--muted);
-  border-color: var(--border);
-  padding: 5px 10px;
-  min-width: 180px;
-  justify-content: flex-start;
+.desktop-toolbar .open-trigger {
+  padding: 7px 12px;
 }
-.quick-trigger kbd {
-  font: 10px system-ui;
-  margin-left: auto;
-  padding: 1px 4px;
+.desktop-toolbar .primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-text);
+}
+.desktop-toolbar .primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.toolbar-menu {
+  position: relative;
+  display: flex;
+}
+.toolbar-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  display: grid;
+  min-width: 156px;
+  padding: 5px;
+  gap: 2px;
+  background: var(--panel-bg);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px #00000024;
+}
+.toolbar-popover button {
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 7px 10px;
+  font-size: 12.5px;
+}
+.toolbar-popover button:hover {
+  background: var(--button-hover);
 }
 .document-tabs {
   display: flex;
@@ -261,6 +272,16 @@
   background: var(--selected-bg);
   color: var(--selected-text);
 }
+.file-row.drag-over > button:first-child {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+  border-radius: 6px;
+}
+.browser-heading.drop-root .workspace-name {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+  border-radius: 6px;
+}
 .file-row .row-more {
   width: 25px;
   flex-shrink: 0;
@@ -298,45 +319,17 @@
   background: var(--content-bg);
   overflow: hidden;
 }
-.document-heading {
-  min-height: 62px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  justify-content: space-between;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--border-soft);
-}
-.document-identity {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 3px;
-}
-.document-identity strong {
-  font-size: 13px;
-  font-weight: 600;
-}
-.document-identity small {
-  color: var(--muted);
-  font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 45vw;
-}
 .document-modes {
   display: flex;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   padding: 3px;
   background: var(--segmented-bg);
   border: 1px solid var(--border-soft);
   border-radius: 7px;
 }
 .document-modes button {
-  font-size: 11px;
-  padding: 3px 8px;
+  font-size: 12px;
+  padding: 3px 10px;
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -346,6 +339,10 @@
   background: var(--active-bg);
   color: var(--active-text);
   box-shadow: 0 1px 3px #00000012;
+}
+.document-modes button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .desktop-content {
   flex: 1;
@@ -766,8 +763,7 @@
 }
 .desktop-shell.immersive .desktop-toolbar,
 .desktop-shell.immersive .document-tabs,
-.desktop-shell.immersive .desktop-status,
-.desktop-shell.immersive .document-heading {
+.desktop-shell.immersive .desktop-status {
   display: none;
 }
 .desktop-shell.drop-active::after {
@@ -786,18 +782,11 @@
 }
 @media (max-width: 1050px) {
   .desktop-toolbar {
-    gap: 12px;
+    gap: 8px;
     padding: 0 12px;
   }
-  .quick-trigger span,
   .document-modes button span {
     display: none;
-  }
-  .desktop-toolbar .quick-trigger {
-    min-width: 72px;
-  }
-  .document-heading {
-    padding: 10px 16px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -815,7 +804,6 @@
   .desktop-outline,
   .pane-resizer,
   .desktop-status,
-  .document-heading,
   .document-warning,
   .app-dialog,
   .dialog-backdrop {
