@@ -647,7 +647,7 @@
         {/if}
       </div>
       <button
-        class:active={!$preferences.leftClosed && Boolean($workspace.root)}
+        class:active={!$preferences.leftClosed}
         title="文件栏"
         aria-label="切换文件栏"
         on:click={() =>
@@ -673,7 +673,7 @@
     onCreate={desktop.createDocument}
   />
   <div class="desktop-workspace">
-    {#if !$preferences.leftClosed && !immersive && ($workspace.root || !active)}
+    {#if !$preferences.leftClosed && !immersive}
       <aside class="desktop-sidebar">
         <FileBrowser
           workspace={$workspace}
