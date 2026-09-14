@@ -27,7 +27,9 @@
     "tauri:build:plus": "node scripts/tauri-build-edition.mjs plus",
     "tauri:build:both": "npm run tauri:build:lite && npm run tauri:build:plus",
     "tauri:build:all": "tauri build",
-    "tauri:build:no-bundle": "tauri build --no-bundle"
+    "tauri:build:no-bundle": "tauri build --no-bundle",
+    "package:local": "node scripts/package-local.mjs",
+    "package:local:both": "node scripts/package-local.mjs both"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.0",

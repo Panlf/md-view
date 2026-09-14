@@ -14,13 +14,17 @@ export default defineConfig(({ mode }) => {
   const rendererEntry = fileURLToPath(new URL(`./src/markdown/renderers/${edition}-entry.ts`, import.meta.url));
   const editionAppName = isWebPlus ? 'WebPlusApp' : edition === 'plus' ? 'PlusApp' : 'LiteApp';
   const editionAppEntry = fileURLToPath(new URL(`./src/${editionAppName}.svelte`, import.meta.url));
+  const runtimeBridgeEntry = fileURLToPath(
+    new URL(`./src/runtime.${isWebPlus ? 'web' : 'desktop'}.ts`, import.meta.url)
+  );
 
   return {
     plugins: [svelte({ configFile: './svelte.config.js' })],
     resolve: {
       alias: {
         '#edition-app': editionAppEntry,
-        '#markdown-renderer': rendererEntry
+        '#markdown-renderer': rendererEntry,
+        '#runtime-bridge': runtimeBridgeEntry
       }
     },
     base: process.env.VITE_BASE_PATH ?? './',
@@ -36,7 +40,9 @@ export default defineConfig(({ mode }) => {
     build: {
       target: 'es2020',
       minify: 'esbuild',
-      sourcemap: false
+      sourcemap: false,
+      // mermaid 按图表类型懒加载，单块超 500KB 属预期（不影响首屏），关闭该提示。
+      chunkSizeWarningLimit: 1500
     }
   };
 });
