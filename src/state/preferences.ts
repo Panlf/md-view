@@ -17,6 +17,10 @@ const defaults: ShellPreferences = {
   excludes: [],
   recent: []
 };
+export function shellPreferencesDefaults(): ShellPreferences {
+  return { ...defaults };
+}
+
 export function loadShellPreferences(): ShellPreferences {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || '{}');

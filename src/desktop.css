@@ -939,6 +939,20 @@
   padding: 6px 10px;
   font-size: 11px;
 }
+.danger-zone {
+  border-color: color-mix(in srgb, #c96357 45%, var(--border-soft));
+}
+.danger-zone legend {
+  color: #c96357;
+}
+.danger-zone .danger {
+  color: #c96357;
+  border-color: color-mix(in srgb, #c96357 55%, var(--border));
+}
+.danger-zone .danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #c96357 12%, transparent);
+  border-color: #c96357;
+}
 .desktop-shell.immersive .desktop-toolbar,
 .desktop-shell.immersive .document-tabs,
 .desktop-shell.immersive .desktop-status {

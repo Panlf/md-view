@@ -472,6 +472,26 @@ fn list_drafts(app: AppHandle, workspace: String) -> AppResult<Vec<DraftSummary>
     Ok(drafts)
 }
 
+/// 重置应用状态时调用：清空全部草稿文件（含未命名文档草稿）。
+#[tauri::command]
+fn clear_all_drafts(app: AppHandle) -> AppResult<usize> {
+    let drafts_dir = drafts_dir(&app)?;
+    if !drafts_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut removed = 0;
+    for entry in fs::read_dir(drafts_dir).map_err(to_error)? {
+        let entry = entry.map_err(to_error)?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) == Some("json") {
+            fs::remove_file(&path).map_err(to_error)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -506,6 +526,7 @@ pub fn run() {
             drafts::delete_draft,
             drafts::list_drafts,
             drafts::move_draft,
+            clear_all_drafts,
             links::initial_open_paths,
             open_default_app_settings,
             open_external_url,

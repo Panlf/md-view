@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { open, save } from '@tauri-apps/plugin-dialog';
+  import { confirm as dialogConfirm, message as dialogMessage, open, save } from '@tauri-apps/plugin-dialog';
   import { convertFileSrc, isTauri } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -33,6 +33,7 @@
   import MarkdownPreview from './components/MarkdownPreview.svelte';
   import OutlinePanel from './components/OutlinePanel.svelte';
   import { createDesktop } from './state/desktop';
+  import { shellPreferencesDefaults } from './state/preferences';
   import { dirty, filename, parentPath, pathKey } from './state/documents';
   import { extractHeadingsFromMarkdown } from './outline';
   import { applyTheme, BACKGROUND_IMAGE_STORAGE_KEY, findTheme, THEME_STORAGE_KEY, themes } from './themes';
@@ -161,6 +162,33 @@
   function openSettings() {
     excludesText = $preferences.excludes.join('\n');
     settingsOpen = true;
+  }
+  // 重置为初始状态：关闭全部标签、清空工作区/最近列表/草稿与全部本地偏好，
+  // 然后重启前端状态（主题、语言、面板布局回到默认，回到欢迎页）。
+  async function resetApplication() {
+    const confirmed = await dialogConfirm(
+      '确定要重置应用吗？将关闭全部文档、清空最近打开与全部草稿，并恢复默认设置。此操作不可撤销。',
+      {
+        title: '重置应用',
+        kind: 'warning',
+        okLabel: '重置',
+        cancelLabel: '取消'
+      }
+    );
+    if (!confirmed) return;
+    settingsOpen = false;
+    try {
+      await desktop.closeAll();
+      desktop.setPreferences(shellPreferencesDefaults());
+      await api.clearAllDrafts();
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('md-view-')) localStorage.removeItem(key);
+      }
+      // 刷新整页：以清空后的存储重新初始化（工作区恢复、主题、语言、偏好全部回到默认）。
+      window.location.reload();
+    } catch (error) {
+      await dialogMessage(`重置失败：${String(error)}`, { title: '重置应用', kind: 'error' });
+    }
   }
   function setTheme(id: string) {
     selectedTheme = findTheme(id);
@@ -973,6 +1001,11 @@
           >{#if exportHtmlFile}<button disabled={!renderedHtml} on:click={exportHtml}>导出 HTML</button
             ><button disabled={!active} on:click={() => window.print()}>打印 / PDF</button>{/if}
         </div>
+      </fieldset>
+      <fieldset class="danger-zone">
+        <legend>重置</legend>
+        <p>关闭全部文档、清空最近打开与草稿，恢复默认主题与设置。</p>
+        <button class="danger" on:click={() => void resetApplication()}>重置应用</button>
       </fieldset>
     </div>
   </div>

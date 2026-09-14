@@ -52,6 +52,7 @@ export const readDraft = (path: string) => invoke<DraftContent | null>('read_dra
 export const deleteDraft = (path: string) => invoke<boolean>('delete_draft', { path });
 export const listDrafts = (workspace = '') => invoke<DraftSummary[]>('list_drafts', { workspace });
 export const moveDraft = (from: string, to: string) => invoke<void>('move_draft', { from, to });
+export const clearAllDrafts = () => invoke<number>('clear_all_drafts');
 export const initialOpenPaths = () => invoke<string[]>('initial_open_paths');
 export const openDefaultAppSettings = () => invoke<void>('open_default_app_settings');
 export const openExternalUrl = (url: string) => invoke<void>('open_external_url', { url });
