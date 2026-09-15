@@ -20,7 +20,11 @@ export type TreeRow = {
 };
 export function flattenTree(workspace: Workspace): TreeRow[] {
   const rows: TreeRow[] = [];
+  const visited = new Set<string>();
   const visit = (path: string, depth: number) => {
+    // 防止 junction/异常数据导致路径环引起无限递归。
+    if (visited.has(path)) return;
+    visited.add(path);
     for (const entry of workspace.directories[path]?.entries ?? []) {
       const dir = workspace.directories[entry.path];
       rows.push({
@@ -51,16 +55,24 @@ export function createWorkspace() {
       }));
     },
     collapse(path: string) {
-      state.update((s) => ({
-        ...s,
-        directories: { ...s.directories, [path]: { ...s.directories[path], expanded: false } }
-      }));
+      state.update((s) => {
+        const dir = s.directories[path];
+        if (!dir || !dir.expanded) return s;
+        return {
+          ...s,
+          directories: { ...s.directories, [path]: { ...dir, expanded: false } }
+        };
+      });
     },
     expand(path: string) {
-      state.update((s) => ({
-        ...s,
-        directories: { ...s.directories, [path]: { ...s.directories[path], expanded: true } }
-      }));
+      state.update((s) => {
+        const dir = s.directories[path];
+        if (!dir || dir.expanded) return s;
+        return {
+          ...s,
+          directories: { ...s.directories, [path]: { ...dir, expanded: true } }
+        };
+      });
     },
     begin(path: string, requestId: string) {
       state.update((s) => ({

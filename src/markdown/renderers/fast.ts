@@ -1,4 +1,5 @@
 import type { Heading } from '../../types';
+import { escapeAttribute, escapeHtml, isFenceClose, readFenceOpen } from '../utils';
 import type { MarkdownRenderContext, MarkdownRenderResult } from './shared';
 
 type Fence = {
@@ -14,7 +15,13 @@ export function renderFastMarkdown(source: string, context: MarkdownRenderContex
   const html: string[] = [];
   let paragraph: string[] = [];
   let list: Array<{ ordered: boolean; text: string }> = [];
-  let fence: Fence | null = null as Fence | null;
+  let fence: Fence | null = null;
+
+  // O(1) 按行号取大纲标题，避免每个标题行对 headings 做线性扫描。
+  const headingByLine = new Map<number, Heading>();
+  for (const heading of context.headings) {
+    headingByLine.set(heading.line, heading);
+  }
 
   const flushParagraph = () => {
     if (paragraph.length === 0) return;
@@ -49,7 +56,7 @@ export function renderFastMarkdown(source: string, context: MarkdownRenderContex
       continue;
     }
 
-    const fenceOpen = readFenceOpen(line);
+    const fenceOpen = readFenceOpenWithLanguage(line);
     if (fenceOpen) {
       flushBlocks();
       fence = { ...fenceOpen, line: lineNumber, lines: [] };
@@ -61,7 +68,7 @@ export function renderFastMarkdown(source: string, context: MarkdownRenderContex
       continue;
     }
 
-    const heading = readHeading(line, context.headings, lineNumber);
+    const heading = readHeading(line, headingByLine, lineNumber);
     if (heading) {
       flushBlocks();
       html.push(
@@ -111,12 +118,12 @@ export function renderFastMarkdown(source: string, context: MarkdownRenderContex
   };
 }
 
-function readHeading(line: string, headings: Heading[], lineNumber: number) {
+function readHeading(line: string, headingByLine: Map<number, Heading>, lineNumber: number) {
   const match = line.match(/^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
   if (!match) return null;
   const text = (match[2] ?? '').trim();
   if (!text) return null;
-  const outlineHeading = headings.find((heading) => heading.line === lineNumber);
+  const outlineHeading = headingByLine.get(lineNumber);
   return {
     anchor: outlineHeading?.anchor || `heading-${lineNumber}`,
     level: match[1]?.length ?? 1,
@@ -125,7 +132,7 @@ function readHeading(line: string, headings: Heading[], lineNumber: number) {
   };
 }
 
-function readFenceOpen(line: string) {
+function readFenceOpenWithLanguage(line: string) {
   const match = line.match(/^ {0,3}(`{3,}|~{3,})\s*([A-Za-z0-9_-]+)?/);
   if (!match) return null;
   const fence = match[1] ?? '';
@@ -134,11 +141,6 @@ function readFenceOpen(line: string) {
     length: fence.length,
     language: match[2] ?? ''
   };
-}
-
-function isFenceClose(line: string, fence: Fence) {
-  const escaped = fence.marker === '`' ? '`' : '~';
-  return new RegExp(`^ {0,3}${escaped}{${fence.length},}\\s*$`).test(line);
 }
 
 function renderCodeBlock(source: string, language: string) {
@@ -153,25 +155,4 @@ function renderInline(source: string) {
     .replace(/__([^_]+)__/g, '<strong>$1</strong>')
     .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
     .replace(/_([^_\n]+)_/g, '<em>$1</em>');
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case '&':
-        return '&amp;';
-      case '<':
-        return '&lt;';
-      case '>':
-        return '&gt;';
-      case '"':
-        return '&quot;';
-      default:
-        return '&#39;';
-    }
-  });
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/\n/g, '&#10;');
 }

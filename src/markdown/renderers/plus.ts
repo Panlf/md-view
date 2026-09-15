@@ -12,6 +12,7 @@ import 'highlight.js/styles/github.css';
 import { defaultPlusPreferences, normalizePlusPreferences, type PlusPreferences } from '../../plusPreferences';
 import type { MarkdownRenderContext, MarkdownRenderResult } from './shared';
 import { postProcessMarkdownHtml } from './shared';
+import { escapeHtml, isFenceClose, readFenceOpen, slugHeading } from '../utils';
 
 type MermaidModule = typeof import('mermaid');
 type FrontmatterBlock = {
@@ -271,19 +272,6 @@ function preprocessPlusMarkdown(source: string, preferences: PlusPreferences) {
 
 function normalizeSoftBreaks(line: string, preferences: PlusPreferences) {
   return preferences.softBreakMode === 'breaks' && line.trim() ? `${line}  ` : line;
-}
-
-function readFenceOpen(line: string) {
-  const match = line.match(/^ {0,3}(`{3,}|~{3,})/);
-  if (!match) return null;
-  const fence = match[1] ?? '';
-  return { marker: fence[0] ?? '`', length: fence.length };
-}
-
-function isFenceClose(line: string, fence: { marker: string; length: number }) {
-  const escaped = fence.marker === '`' ? '`' : '~';
-  const pattern = new RegExp(`^ {0,3}${escaped}{${fence.length},}\\s*$`);
-  return pattern.test(line);
 }
 
 function isFrontmatterBoundary(line: string) {
@@ -635,29 +623,4 @@ function textElement(tagName: string, text: string) {
   return element;
 }
 
-function slugHeading(text: string, index: number) {
-  const slug = text
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
-  return slug ? `heading-${slug}` : `heading-${index + 1}`;
-}
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case '&':
-        return '&amp;';
-      case '<':
-        return '&lt;';
-      case '>':
-        return '&gt;';
-      case '"':
-        return '&quot;';
-      default:
-        return '&#39;';
-    }
-  });
-}

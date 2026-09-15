@@ -2,129 +2,178 @@
 
 [中文](README.md)
 
-md-view is a local Markdown reader and editor built with Tauri 2, Svelte, and Vite. It is designed for users who want a lightweight local Markdown tool that can be downloaded, modified, and rebuilt easily.
+md-view is a local Markdown reader and editor built with Tauri 2, Svelte 5, and Vite. It is designed for users who want a lightweight local Markdown tool that can be downloaded, modified, and rebuilt easily.
+
+> This project is developed and maintained based on [T-meow/md-view](https://github.com/T-meow/md-view). Thanks to the original author. Licensed under WTFPL v2.
 
 [Product website](https://t-meow.github.io/md-view/) · [Online demo](https://t-meow.github.io/md-view/play/) · [Public downloads](https://github.com/T-meow/md-view/releases/latest)
 
-## Development version
-
-This branch contains an unreleased desktop refactor. Public downloads follow their Release notes.
-
-- Opening a file reads only that document. Folder browsing loads direct children on demand and renders only visible rows.
-- Tabs keep independent content, source undo history, view modes and reading positions. `Ctrl+P` searches open, recent and loaded files before an explicit workspace indexing action.
-- Shared Lite/Plus file management: create files and folders, Save As, rename, move, trash, copy paths and reveal files.
-- Manual saves and automatic drafts are the default. Optional write-back is off. Snapshot saves check disk conflicts, replace files atomically and preserve supported encoding, BOM and line endings.
-- Ignore rules include `.gitignore`, `.ignore` and custom exclusions. Links and junctions are not traversed. Scans stop at 100,000 entries or 30 seconds; files over 2 MiB open in source mode.
-
-Shortcuts: `Ctrl+N`, `Ctrl+O`, `Ctrl+P`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab` / `Ctrl+Shift+Tab`. The corresponding Command combinations work on macOS.
-
-See the [development record](docs/load-performance-plan.md) for architecture, interfaces and validation.
+![md-view preview](assets/preview.png)
 
 ## Highlights
 
-- Lightweight: uses the system WebView; Lite keeps essential rendering. Download sizes depend on the release.
-- Small app size: easy to download, package, copy, and run locally.
-- Outline panel: extracts headings automatically and supports quick navigation.
-- Multiple views: read mode, source editing, visual editing, and split preview.
-- Appearance options: built-in themes and custom reader background images.
-- Local-first: opens local `.md` / `.markdown` files or folders without a cloud service.
-
-![md-view preview](assets/preview.png)
+- **Lightweight & local**: uses the system WebView, no cloud dependency; easy to download, package, copy, and run locally.
+- **On-demand loading**: opening a file reads only that document; folders load level by level, and large lists render visible rows only.
+- **Multi-tab sessions**: keep content, source undo history, view modes, and reading positions.
+- **Multiple views**: read mode, source editing (CodeMirror), visual editing, and split preview.
+- **Outline navigation**: extracts headings automatically and supports quick jumps.
+- **Appearance**: built-in light/dark themes and optional reader background images.
+- **File management**: create, Save As, rename, move, trash, copy path, and reveal in system.
+- **Safe saves**: version snapshots, conflict checks, and atomic replace; preserves UTF-8 / GBK / UTF-16, BOM, and line endings.
 
 ## Features
 
-- Open local Markdown files or folders
-- Browse files with a file tree
-- Source editing, reading preview, visual editing, and split preview
-- Jump through the heading outline
-- Draft saving
-- Save conflict detection
-- Support for `.md` and `.markdown`
-- Theme switching and reader background images
-- Windows default-app settings entry
+| Category | Details |
+| --- | --- |
+| Open | Local `.md` / `.markdown` files or folders |
+| Edit | Source editing, visual editing, split preview |
+| Preview | GFM, code highlighting, tables, math, Mermaid (Plus) |
+| Outline | Heading extraction and jump (`Ctrl+P` heading search, Plus) |
+| Drafts | Automatic draft recovery; auto write-back off by default |
+| Save | Conflict detection, Save As, encoding/line-ending preserve |
+| Search | Open / recent / loaded files; workspace index on demand |
+| Themes | Built-in themes, reader background, immersive mode |
+| Export | HTML export (Plus) |
 
-## Edition Development Strategy
+### Shortcuts
 
-md-view is maintained as two editions: Lite and Plus.
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+N` | New document |
+| `Ctrl+O` | Open file |
+| `Ctrl+P` | Quick open |
+| `Ctrl+S` | Save |
+| `Ctrl+Shift+S` | Save As |
+| `Ctrl+W` | Close tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Switch tab |
+| `F11` | Immersive mode |
+
+Command combinations work on macOS.
+
+### Scan and safety boundaries
+
+- Links and junctions are not traversed by default.
+- Honors `.gitignore`, `.ignore`, and custom exclusions.
+- Scan budget: 100,000 entries / 30 seconds.
+- Documents larger than 2 MiB open in source mode by default.
+
+See the [development record](docs/load-performance-plan.md) for architecture, interfaces, and validation.
+
+## Edition Strategy
+
+md-view is maintained as two editions: **Lite** and **Plus**.
+
+| | Lite | Plus |
+| --- | --- | --- |
+| Sessions / file management / drafts / folder browse | ✓ | ✓ |
+| Filename search | ✓ | ✓ |
+| Advanced rendering (math, Mermaid, GFM extras) | — | ✓ |
+| Workspace heading index | — | ✓ |
+| HTML export / advanced reading settings | — | ✓ |
 
 - `main` maintains the shared desktop UI and file capabilities. Plus is the advanced rendering baseline.
-- Lite and Plus share sessions, file management, drafts, folder browsing and filename search. Workspace heading search, advanced rendering, HTML export and advanced reading settings belong to Plus.
-- Default development and packaging commands target Plus. Use explicit `:*:lite` commands when working on Lite.
+- Default development and packaging commands target Plus; use explicit `:*:lite` commands for Lite.
+
+## Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| Desktop shell | Tauri 2 (Rust) |
+| Frontend | Svelte 5 + TypeScript + Vite |
+| Source editor | CodeMirror 6 |
+| Lite rendering | marked |
+| Plus rendering | unified / remark / rehype, KaTeX, highlight.js, Mermaid |
+| Tests | Vitest, Rust `cargo test` |
+| Type check | `svelte-check` |
+
+## Project Structure
+
+```text
+src/
+  state/          # document sessions, workspace, search, drafts, preferences
+  components/     # editor, preview, file tree, tabs, and other UI
+  markdown/       # render pipeline (fast / lite / plus) and shared helpers
+  AppShell.svelte # desktop shell
+src-tauri/        # Rust backend (files, scan, watch, drafts)
+site/             # product website sources
+tests/            # end-to-end and regression tests
+docs/             # development notes and syntax samples
+```
 
 ## Local Development
 
 Install these first:
 
 - Node.js 24 LTS (used by CI)
-- Rust stable, at least 1.88 to match the locked dependencies
-- The Tauri desktop dependencies required by your operating system
-
-Run:
+- Rust stable ≥ 1.88 to match the locked dependencies
+- The Tauri desktop dependencies required by your OS
 
 ```bash
 npm ci --registry=https://registry.npmmirror.com/
-npm run tauri:dev
+npm run tauri:dev        # Plus
+npm run tauri:dev:lite   # Lite
 ```
 
-By default, `npm run tauri:dev` starts Plus. For Lite development, run:
+Frontend-only debugging (without Tauri):
 
 ```bash
-npm run tauri:dev:lite
+npm run dev:plus
+npm run dev:lite
 ```
 
 ## Local Packaging
 
 ```bash
 npm install
-npm run tauri:build
-```
-
-By default, `npm run tauri:build` packages Plus. Common edition commands:
-
-```bash
+npm run tauri:build          # defaults to Plus
 npm run tauri:build:plus
 npm run tauri:build:lite
-npm run tauri:build:both
+npm run tauri:build:both     # both editions
 ```
 
-Build artifacts are written to:
+Artifacts:
 
 ```text
 src-tauri/target/release/bundle/
+release/   # normalized installers and portable executables
 ```
 
-The edition build scripts also copy normalized installers and portable executables to the root `release/` directory for local distribution and CI uploads.
-
-The current configuration builds the package types supported by the current system:
+The current configuration builds package types supported by the current system:
 
 - Windows: NSIS installer
 - macOS: DMG
 - Linux: AppImage, DEB, RPM
 
-These are build targets, not a promise of public binaries for every platform. Public `v1.0.1` offers Windows x64 portable apps and macOS Apple Silicon DMGs.
+These are build capabilities, not a promise of public binaries for every platform. Public downloads follow [Releases](https://github.com/T-meow/md-view/releases/latest).
 
-On Windows, the default local build uses NSIS to avoid downloading WiX for the `all` target. To try every bundle target supported by the current system, run:
+On Windows, local builds use NSIS by default. To try every bundle target supported by the current system:
 
 ```bash
 npm run tauri:build:all
 ```
 
-## Website and online demo
+## Website and Online Demo
 
-`site/` contains the independent Chinese and English product pages. The homepage does not import editor dependencies; the Svelte demo lives at `/md-view/play/`.
+`site/` contains independent Chinese and English product pages that do not load the editor. The Svelte demo lives at `/md-view/play/`.
 
 ```bash
 npm run build:web
 npm run check:web
 ```
 
-Desktop frontend output is `dist/`. The demo builds to `dist-play/`; the combined Pages artifact is `dist-site/`. `VITE_BASE_PATH` overrides the default `/md-view/` prefix. Product copy describes publicly released features only.
+| Directory | Purpose |
+| --- | --- |
+| `dist/` | Desktop frontend |
+| `dist-play/` | Online demo intermediate output |
+| `dist-site/` | Combined Pages artifact |
 
-## Development checks
+Default path prefix is `/md-view/`; override with `VITE_BASE_PATH`.
+
+## Development Checks
 
 ```bash
-npm run check
-npm test
+npm run check              # svelte-check
+npm test                   # Vitest
 npm run check:editions
 npm run build:lite
 npm run build:plus
@@ -132,38 +181,37 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 cargo check --manifest-path src-tauri/Cargo.toml --locked
 ```
 
-## Linux Dependencies
+## Platform Dependencies
+
+### Linux
 
 Ubuntu/Debian usually needs:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf rpm
+sudo apt-get install -y build-essential curl wget file \
+  libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+  libayatana-appindicator3-dev librsvg2-dev patchelf rpm
 ```
 
 For other distributions, install the corresponding Tauri 2 Linux dependencies.
 
-## macOS Note
+### macOS
 
 This project does not perform Apple signing or notarization by default. If you package and share it directly, macOS may block the unsigned app with Gatekeeper. Add a developer certificate, signing, and notarization before formal public distribution.
 
 ## GitHub Actions
 
-`.github/workflows/pages.yml` checks the site and demo on PRs to `main`. It deploys Pages only on `main` updates or manual runs against `main`.
-
-The desktop workflow `.github/workflows/build.yml`:
-
-- Builds Windows and macOS on pushes to `plus` / `main` / `master`
-- Runs build checks for pull requests to `plus` / `main` / `master`
-- Covers both Lite and Plus in the build matrix, with edition and version included in uploaded artifact names
-- Supports manual workflow runs
-- Creates a draft Release and uploads build artifacts when a `v*` tag is pushed
-
-Example:
+- `.github/workflows/pages.yml`: builds the site and demo on PRs to `main` and checks routes; deploys Pages only on `main` updates or manual runs.
+- `.github/workflows/build.yml`:
+  - Builds Windows and macOS on pushes to `plus` / `main` / `master`
+  - Runs build checks on pull requests
+  - Covers Lite and Plus in the matrix; artifact names include edition and version
+  - Creates a draft Release and uploads artifacts when a `v*` tag is pushed
 
 ```bash
-git tag v0.2.4
-git push origin v0.2.4
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ## Contributions
@@ -172,6 +220,8 @@ Pull requests are not accepted. Fork this repository and use an AI coding agent 
 
 ## License and Disclaimer
 
-This project uses WTFPL v2. In short: do what you want with it.
+This project uses [WTFPL v2](./LICENSE). In short: do what you want with it.
+
+Original project copyright is recorded in the repository [LICENSE](./LICENSE) and upstream [T-meow/md-view](https://github.com/T-meow/md-view).
 
 Disclaimer: this project is provided as is, without any express or implied warranty. The author does not guarantee that it is suitable for any particular purpose and is not responsible for any issues, losses, or liability caused by using, modifying, packaging, distributing, or running this project. Use it at your own risk.

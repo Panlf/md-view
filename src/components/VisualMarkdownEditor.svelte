@@ -3,6 +3,7 @@
   import DOMPurify from 'dompurify';
   import { marked } from 'marked';
   import { toImageAssetSrc } from '../fileAssets';
+  import { escapeAttribute, escapeHtml } from '../markdown/utils';
   import { text, type VisualText } from '../i18n';
   import type { Heading } from '../types';
 
@@ -335,14 +336,6 @@
 
   function normalizeText(text: string) {
     return text.replace(/\u00a0/g, ' ');
-  }
-
-  function escapeHtml(value: string) {
-    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function escapeAttribute(value: string) {
-    return escapeHtml(value).replace(/\n/g, '&#10;');
   }
 
   function annotateHeadings() {

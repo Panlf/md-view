@@ -56,6 +56,7 @@
   }
   onDestroy(stopAutoScroll);
   $: rows = flattenTree(workspace);
+  $: rowByPathKey = new Map(rows.map((row) => [pathKey(row.entry.path), row]));
   $: start = Math.max(0, Math.floor(scrollTop / rowHeight) - 6);
   $: visible = rows.slice(start, start + Math.ceil(height / rowHeight) + 12);
   $: root = workspace.directories[workspace.root];
@@ -78,7 +79,8 @@
     await tick();
     viewport.querySelector<HTMLButtonElement>(`[data-row="${next}"]`)?.focus();
   }
-  function dropAllowed(targetDir: string, source: TreeRow | null = dragging) {    if (!source) return false;
+  function dropAllowed(targetDir: string, source: TreeRow | null = dragging) {
+    if (!source) return false;
     const src = source.entry.path;
     // 目标是自己、自己所在目录、或自己的子目录时拒绝放置。
     if (pathKey(src) === pathKey(targetDir)) return false;
@@ -93,7 +95,7 @@
       return dropAllowed(workspace.root) ? workspace.root : '';
     }
     const path = el.getAttribute('data-path') ?? '';
-    const row = rows.find((candidate) => pathKey(candidate.entry.path) === pathKey(path));
+    const row = rowByPathKey.get(pathKey(path));
     if (!row || row.entry.kind !== 'directory' || !dropAllowed(path)) return '';
     return path;
   }
@@ -145,7 +147,7 @@
     setTimeout(() => (suppressClick = false), 0);
     if (!source || !target) return;
     onMoveEntry(source.entry, target);
-    const targetRow = rows.find((candidate) => pathKey(candidate.entry.path) === pathKey(target));
+    const targetRow = rowByPathKey.get(pathKey(target));
     if (targetRow && !targetRow.expanded) onSelect(targetRow.entry);
   }
 </script>

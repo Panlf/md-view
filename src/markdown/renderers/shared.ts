@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify';
 import { isLocalMarkdownPath, resolveLocalPath, toImageAssetSrc } from '../../fileAssets';
+import { slugHeading } from '../utils';
 import type { Heading, LinkValidationRequest } from '../../types';
 
 const SAFE_EXTRA_TAGS = [
@@ -152,14 +153,4 @@ function normalizeHeadingText(text: string) {
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
-}
-
-function slugHeading(text: string, index: number) {
-  const slug = text
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
-  return slug ? `heading-${slug}` : `heading-${index + 1}`;
 }

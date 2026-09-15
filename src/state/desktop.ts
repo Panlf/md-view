@@ -46,7 +46,20 @@ export function createDesktop() {
   let checkAgain = false;
   let operationPending = false;
   const changingPaths = new Set<string>();
-  const pathBusy = (path: string) => Boolean(path) && [...changingPaths].some((root) => isWithin(path, root));
+  const pathBusy = (path: string) => {
+    if (!path) return false;
+    for (const root of changingPaths) {
+      if (isWithin(path, root)) return true;
+    }
+    return false;
+  };
+  function clearDraftTimer(id: string) {
+    const timer = draftTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      draftTimers.delete(id);
+    }
+  }
   function invalidatePendingOpens(root: string) {
     for (const [key, pending] of pendingOpen) {
       if (isWithin(key, root)) pending.invalidated = true;
@@ -240,7 +253,7 @@ export function createDesktop() {
   }
 
   function scheduleDraft(id: string) {
-    clearTimeout(draftTimers.get(id));
+    clearDraftTimer(id);
     draftTimers.set(
       id,
       setTimeout(async () => {
@@ -318,8 +331,7 @@ export function createDesktop() {
           if (!documents.find(id)) return true;
           documents.saved(id, reply.file, snapshot);
           remember(reply.file.path);
-          clearTimeout(draftTimers.get(id));
-          draftTimers.delete(id);
+          clearDraftTimer(id);
           await draftQueue.run(oldDraftKey, () => api.deleteDraft(oldDraftKey));
           const current = documents.find(id);
           if (current && dirty(current)) scheduleDraft(id);
@@ -405,8 +417,7 @@ export function createDesktop() {
     if (!(await prepareClose(id))) return false;
     const doc = documents.find(id);
     if (!doc) return true;
-    clearTimeout(draftTimers.get(id));
-    draftTimers.delete(id);
+    clearDraftTimer(id);
     try {
       await draftQueue.run(draftKey(doc), () => api.deleteDraft(draftKey(doc)));
     } catch (cause) {
@@ -436,7 +447,7 @@ export function createDesktop() {
       return false;
     }
     for (const doc of tabs) {
-      clearTimeout(draftTimers.get(doc.id));
+      clearDraftTimer(doc.id);
       await draftQueue.run(draftKey(doc), () => api.deleteDraft(draftKey(doc)));
     }
     await draftQueue.flush();
@@ -449,7 +460,7 @@ export function createDesktop() {
   }
   async function flushDrafts() {
     for (const doc of documents.snapshot().tabs) {
-      clearTimeout(draftTimers.get(doc.id));
+      clearDraftTimer(doc.id);
       if (dirty(doc)) await draftQueue.run(draftKey(doc), () => api.writeDraft(draftKey(doc), doc.content));
     }
     await draftQueue.flush();
@@ -700,7 +711,7 @@ export function createDesktop() {
       if (action === 'trash') {
         await api.trashPath(entry.path);
         for (const doc of affected) {
-          clearTimeout(draftTimers.get(doc.id));
+          clearDraftTimer(doc.id);
           await draftQueue.run(draftKey(doc), () => api.deleteDraft(draftKey(doc)));
           if (documents.find(doc.id)?.version !== doc.version) {
             documents.patch(doc.id, { missing: true, externalChanged: true });
@@ -758,6 +769,7 @@ export function createDesktop() {
     disposed = true;
     cancelSearch();
     for (const timer of draftTimers.values()) clearTimeout(timer);
+    draftTimers.clear();
     for (const dir of Object.values(workspace.snapshot().directories))
       if (dir.loading) void api.cancelScan(dir.requestId);
     void api.watchWorkspace([]);

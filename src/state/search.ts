@@ -2,14 +2,15 @@ import { get, writable } from 'svelte/store';
 import type { ScanBatch } from '../types';
 export type SearchItem = { path: string; label: string; detail: string; line?: number; anchor?: string };
 export function filterSearchItems(items: SearchItem[], query: string, limit = 80): SearchItem[] {
+  const needle = query.trim().toLowerCase();
+  // 空查询下 includes('') 恒为 true，等价于返回前 limit 条去重结果。
   const found: SearchItem[] = [];
   const seen = new Set<string>();
-  const needle = query.trim().toLowerCase();
   for (const item of items) {
     const key = `${item.path}:${item.line ?? 0}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (`${item.label} ${item.detail}`.toLowerCase().includes(needle)) found.push(item);
+    if (!needle || `${item.label} ${item.detail}`.toLowerCase().includes(needle)) found.push(item);
     if (found.length >= limit) break;
   }
   return found;

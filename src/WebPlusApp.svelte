@@ -5,6 +5,7 @@
   import { appVersion, editionDisplayName, plusMarkdownStatus } from './edition';
   import { extractHeadingsFromMarkdown } from './outline';
   import { renderFullMarkdown } from './markdown/renderers/deferred';
+  import { escapeHtml } from './markdown/utils';
   import { applyTheme, findTheme, THEME_STORAGE_KEY, themes } from './themes';
   import {
     defaultPlusPreferences,
@@ -190,23 +191,6 @@ flowchart LR
   function safeFileName(name: string, fallback: string) {
     const trimmed = name.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-');
     return trimmed || fallback;
-  }
-
-  function escapeHtml(value: string) {
-    return value.replace(/[&<>"']/g, (char) => {
-      switch (char) {
-        case '&':
-          return '&amp;';
-        case '<':
-          return '&lt;';
-        case '>':
-          return '&gt;';
-        case '"':
-          return '&quot;';
-        default:
-          return '&#39;';
-      }
-    });
   }
 </script>
 

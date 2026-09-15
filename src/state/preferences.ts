@@ -27,6 +27,8 @@ export function loadShellPreferences(): ShellPreferences {
     return {
       ...defaults,
       ...saved,
+      leftClosed: saved.leftClosed === true,
+      rightClosed: saved.rightClosed === true,
       autoWrite: saved.autoWrite === true,
       leftWidth: Math.min(460, Math.max(180, Number(saved.leftWidth) || 250)),
       rightWidth: Math.min(400, Math.max(180, Number(saved.rightWidth) || 220)),

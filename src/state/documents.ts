@@ -1,6 +1,9 @@
 import { get, writable } from 'svelte/store';
 import type { EditorState } from '@codemirror/state';
 import type { DiskRevision, DocumentFile, ViewMode } from '../types';
+import { childPath, filename, isWithin, parentPath, pathKey } from './paths';
+
+export { childPath, filename, isWithin, parentPath, pathKey };
 
 export type DocumentSession = {
   id: string;
@@ -28,18 +31,6 @@ export type SessionState = { tabs: DocumentSession[]; activeId: string };
 export const LARGE_DOCUMENT_BYTES = 2 * 1024 * 1024;
 export const dirty = (doc: DocumentSession) => doc.content !== doc.savedContent || !doc.path;
 export const draftKey = (doc: DocumentSession) => doc.path || `untitled:${doc.id}`;
-export const filename = (path: string) => path.split(/[\\/]/).pop() || '未命名.md';
-export const pathKey = (path: string) => {
-  const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
-  return /^[a-z]:\//i.test(normalized) || normalized.startsWith('//') ? normalized.toLowerCase() : normalized;
-};
-export const isWithin = (path: string, root: string) =>
-  pathKey(path) === pathKey(root) || pathKey(path).startsWith(`${pathKey(root)}/`);
-export const parentPath = (path: string) => {
-  const parent = path.replace(/\\/g, '/').replace(/\/[^/]*$/, '') || '/';
-  return /^[a-z]:$/i.test(parent) ? `${parent}/` : parent;
-};
-export const childPath = (parent: string, name: string) => `${parent.replace(/[\\/]$/, '')}/${name}`;
 
 function session(file?: DocumentFile, id: string = crypto.randomUUID()): DocumentSession {
   return {
@@ -68,16 +59,22 @@ function session(file?: DocumentFile, id: string = crypto.randomUUID()): Documen
 
 export function createDocuments() {
   const state = writable<SessionState>({ tabs: [], activeId: '' });
+  // 空更新直接返回原状态，避免无意义的对象克隆与订阅通知。
   const patch = (
     id: string,
     update: Partial<DocumentSession> | ((doc: DocumentSession) => Partial<DocumentSession>)
   ) =>
-    state.update((s) => ({
-      ...s,
-      tabs: s.tabs.map((doc) =>
-        doc.id === id ? { ...doc, ...(typeof update === 'function' ? update(doc) : update) } : doc
-      )
-    }));
+    state.update((s) => {
+      let changed = false;
+      const tabs = s.tabs.map((doc) => {
+        if (doc.id !== id) return doc;
+        const partial = typeof update === 'function' ? update(doc) : update;
+        if (!partial || Object.keys(partial).length === 0) return doc;
+        changed = true;
+        return { ...doc, ...partial };
+      });
+      return changed ? { ...s, tabs } : s;
+    });
   return {
     subscribe: state.subscribe,
     snapshot: () => get(state),

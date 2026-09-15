@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import { renderFastPreview, renderFullMarkdown } from '../markdown/renderers/deferred';
+  import { escapeHtml } from '../markdown/utils';
   import { openExternalUrl, validateLocalLinks } from '../runtime';
   import type { Heading, LinkValidationResult } from '../types';
 
@@ -440,23 +441,6 @@
   async function tickAfterHtml() {
     await Promise.resolve();
     await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-
-  function escapeHtml(value: string) {
-    return value.replace(/[&<>"']/g, (char) => {
-      switch (char) {
-        case '&':
-          return '&amp;';
-        case '<':
-          return '&lt;';
-        case '>':
-          return '&gt;';
-        case '"':
-          return '&quot;';
-        default:
-          return '&#39;';
-      }
-    });
   }
 </script>
 
